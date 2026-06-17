@@ -20,6 +20,9 @@ struct SearchView: View {
 
     @FocusState private var searchFocused: Bool
     @FocusState private var pinciteFocused: Bool
+    /// True once the user has pressed ↓ to navigate results. In this mode → jumps to
+    /// the pincite; while still editing the query, → moves the text cursor instead.
+    @State private var isNavigating = false
 
     private var hasResults: Bool { !model.results.isEmpty }
 
@@ -48,6 +51,7 @@ struct SearchView: View {
         .onChange(of: model.showCount) { _, _ in
             pinciteFocused = false
             searchFocused = true
+            isNavigating = false
         }
     }
 
@@ -60,15 +64,23 @@ struct SearchView: View {
                 .foregroundStyle(.secondary)
             TextField("Search a case…", text: Binding(
                 get: { model.query },
-                set: { model.queryChanged($0) }
+                // Typing returns to editing mode, so arrows move the cursor again.
+                set: { isNavigating = false; model.queryChanged($0) }
             ))
             .textFieldStyle(.plain)
             .font(.title2)
             .focused($searchFocused)
-            .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }
-            .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
+            .onKeyPress(.upArrow) { isNavigating = true; model.moveSelection(by: -1); return .handled }
+            .onKeyPress(.downArrow) { isNavigating = true; model.moveSelection(by: 1); return .handled }
             .onKeyPress(.return) { commit(); return .handled }
             .onKeyPress(.tab) { pinciteFocused = true; return .handled }
+            .onKeyPress(.rightArrow) {
+                // In navigation mode (after ↓), → jumps to the pincite. While editing,
+                // let → move the text cursor as usual.
+                guard isNavigating, hasResults else { return .ignored }
+                pinciteFocused = true
+                return .handled
+            }
             .onKeyPress(.escape) {
                 // First Esc clears the query; a second (empty) Esc falls through to
                 // the panel's cancelOperation, which dismisses.
@@ -152,6 +164,12 @@ struct SearchView: View {
                 .frame(width: 80)
                 .focused($pinciteFocused)
                 .onKeyPress(.return) { commit(); return .handled }
+                .onKeyPress(.leftArrow) {
+                    // ← from an empty pincite hops back to the search field.
+                    guard model.pincite.isEmpty else { return .ignored }
+                    searchFocused = true
+                    return .handled
+                }
             Spacer()
             if let msg = model.statusMessage {
                 Text(msg).foregroundStyle(.orange)
