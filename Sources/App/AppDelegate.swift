@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Nudge the Accessibility permission early so paste-back works on first use.
         Permissions.ensureTrusted(prompt: true)
 
+        setUpMainMenu()
         setUpMenuBar()
         setUpPanel()
 
@@ -33,9 +34,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Agent apps don't get a main menu for free, so the standard text-editing
+    /// shortcuts (⌘A/⌘C/⌘V/⌘X/⌘Z) won't reach the search field's editor. Install a
+    /// minimal Edit menu wired to the first-responder selectors to restore them.
+    private func setUpMainMenu() {
+        let mainMenu = NSMenu()
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editItem.submenu = editMenu
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        NSApp.mainMenu = mainMenu
+    }
+
     private func setUpMenuBar() {
         let item = NSStatusItem.let_make()
-        item.button?.image = NSImage(systemSymbolName: "quote.bubble", accessibilityDescription: "Bluebook")
+        item.button?.image = NSImage(systemSymbolName: "quote.bubble", accessibilityDescription: "Case Citer")
         let menu = NSMenu()
         menu.addItem(withTitle: "Search…", action: #selector(togglePanel), keyEquivalent: "")
         menu.addItem(.separator())
@@ -69,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model?.pincite = ""
         model?.signal = nil
         model?.statusMessage = nil
+        model?.showCount += 1 // re-focus the search field (see SearchView)
         NSApp.activate(ignoringOtherApps: true)
         panel.center()
         panel.makeKeyAndOrderFront(nil)

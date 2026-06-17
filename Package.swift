@@ -8,12 +8,12 @@ import PackageDescription
 // live alongside it in this repo; only Bluebook *domain knowledge* carries over.
 // The intent is for this to graduate into its own repository.
 let package = Package(
-    name: "bluebook-inserter",
+    name: "case-citer",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "BluebookFormat", targets: ["BluebookFormat"]),
         .library(name: "CourtListener", targets: ["CourtListener"]),
-        .executable(name: "bluebook-inserter", targets: ["App"]),
+        .executable(name: "case-citer", targets: ["App"]),
     ],
     dependencies: [
         // Global hotkey registration + recorder UI (wraps Carbon RegisterEventHotKey).

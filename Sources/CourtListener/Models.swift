@@ -27,6 +27,20 @@ public struct SearchResult: Decodable {
         return Int(d.prefix(4))
     }
 
+    /// True if this result carries at least one parseable reporter citation. A
+    /// result without one can't yield a Bluebook cite, so it's noise in a citation
+    /// tool and gets filtered from the result list.
+    public var isCiteable: Bool {
+        !(citation ?? []).compactMap(CitationParser.parse).isEmpty
+    }
+
+    /// The citation the formatter will actually print (official reporter preferred),
+    /// so the result row matches what gets pasted — not CourtListener's arbitrary
+    /// first parallel cite.
+    public var preferredCitationText: String? {
+        Reporter.primary(from: toCaseRecord().citations).flatMap { Reporter.render($0, pincite: nil) }
+    }
+
     /// Map this CL result onto the formatter's source-agnostic `CaseRecord`.
     public func toCaseRecord() -> CaseRecord {
         let cites = (citation ?? []).compactMap(CitationParser.parse)

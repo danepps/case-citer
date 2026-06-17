@@ -38,6 +38,12 @@ struct SearchView: View {
             }
         }
         .onAppear { searchFocused = true }
+        .onChange(of: model.showCount) { _, _ in
+            // Always land in the search field when the panel re-opens, even if the
+            // user last left focus in the pincite field.
+            pinciteFocused = false
+            searchFocused = true
+        }
     }
 
     private var searchField: some View {
@@ -96,6 +102,10 @@ struct SearchView: View {
                 .frame(width: 80)
                 .focused($pinciteFocused)
                 .onKeyPress(.return) { commit(); return .handled }
+            Toggle("Law review style", isOn: $model.lawReviewStyle)
+                .toggleStyle(.checkbox)
+                .font(.caption)
+                .help("On: full case name roman (footnotes). Off: full caption italicized (briefs).")
             Spacer()
             if let msg = model.statusMessage {
                 Text(msg).foregroundStyle(.orange)
@@ -120,7 +130,7 @@ private struct ResultRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(result.caseName ?? "—").fontWeight(selected ? .semibold : .regular)
             HStack(spacing: 8) {
-                if let cite = result.citation?.first { Text(cite) }
+                if let cite = result.preferredCitationText { Text(cite) }
                 if let court = result.court { Text(court) }
                 if let y = result.year { Text(String(y)) }
             }

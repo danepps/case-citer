@@ -1,4 +1,4 @@
-# bluebook-inserter
+# Case Citer
 
 A standalone macOS utility: press a global hotkey (default **⌘⇧-Space**) from *any*
 app, get a floating Spotlight-style search box, type a case name, pick a result from
@@ -46,7 +46,7 @@ always italic in both modes.
 ```sh
 swift test                 # runs the BluebookFormat unit tests (any platform)
 swift build                # builds everything (macOS)
-swift run bluebook-inserter # launches the agent (macOS)
+swift run case-citer       # launches the agent (macOS)
 ```
 
 ### Running the agent locally

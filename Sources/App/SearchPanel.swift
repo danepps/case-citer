@@ -43,5 +43,12 @@ final class SearchPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) {
         orderOut(nil) // Esc dismisses
     }
+
+    /// Spotlight-style: clicking anywhere outside the panel (which resigns key)
+    /// dismisses it, so the user doesn't have to click in and press Esc.
+    override func resignKey() {
+        super.resignKey()
+        orderOut(nil)
+    }
 }
 #endif

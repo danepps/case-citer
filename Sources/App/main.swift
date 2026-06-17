@@ -16,5 +16,5 @@ MainActor.assumeIsolated {
 #else
 // Non-macOS toolchains (e.g. CI on Linux) can still build/test the pure
 // BluebookFormat library; the agent app itself is macOS-only.
-print("bluebook-inserter is a macOS app; build on macOS.")
+print("Case Citer is a macOS app; build on macOS.")
 #endif

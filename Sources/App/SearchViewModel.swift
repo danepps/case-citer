@@ -15,6 +15,14 @@ final class SearchViewModel: ObservableObject {
     @Published var signal: Signal? = nil
     @Published var statusMessage: String? = nil
     @Published var showingSignalPicker = false
+    /// Bumped each time the panel is (re)shown so the view re-focuses the search
+    /// field — `.onAppear` only fires once, but the panel is reused across shows.
+    @Published var showCount = 0
+    /// Law-review style: checked = full case name roman (footnote style); unchecked
+    /// = court-document style, where the full caption is italicized. Persisted.
+    @Published var lawReviewStyle: Bool = (AppSettings.shared.style == .lawReview) {
+        didSet { AppSettings.shared.style = lawReviewStyle ? .lawReview : .courtDocument }
+    }
 
     private let client: SearchClient
     private var searchTask: Task<Void, Never>?
@@ -39,6 +47,10 @@ final class SearchViewModel: ObservableObject {
     // MARK: debounced search
 
     func queryChanged(_ newValue: String) {
+        // Ignore no-op re-sets of the same text (e.g. SwiftUI re-pushing the binding
+        // when focus leaves the field on Tab). Re-running the search would reset the
+        // result selection to 0 and yank the user's pick out from under them.
+        guard newValue != query else { return }
         query = newValue
         searchTask?.cancel()
         let trimmed = newValue.trimmingCharacters(in: .whitespaces)
@@ -55,15 +67,25 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func runSearch(_ q: String) async {
+        // Clear any stale error from a prior attempt and show progress, so a slow
+        // first request doesn't leave "Offline" lingering on screen.
+        self.statusMessage = "Searching…"
         do {
-            let hits = try await client.searchOpinions(q)
+            // Drop results with no parseable reporter citation — they can't yield a
+            // Bluebook cite, so they're dead weight in the picker.
+            let hits = try await client.searchOpinions(q).filter(\.isCiteable)
             if Task.isCancelled { return }
             self.results = hits
             self.selection = 0
             self.statusMessage = hits.isEmpty ? "No results" : nil
         } catch let SearchClient.ClientError.http(code) {
             self.statusMessage = code == 429 ? "Rate limited — try again shortly" : "Server error (\(code))"
+        } catch SearchClient.ClientError.timedOut {
+            self.statusMessage = "CourtListener is slow — try again"
         } catch SearchClient.ClientError.transport {
+            // A cancelled in-flight request (the user kept typing) surfaces here as a
+            // transport error — that's not an outage, so don't cry "Offline".
+            if Task.isCancelled { return }
             self.statusMessage = "Offline — check your connection"
         } catch {
             self.statusMessage = "Search failed"
