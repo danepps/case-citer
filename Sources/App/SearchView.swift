@@ -19,39 +19,49 @@ struct SearchView: View {
     var onHeightChange: (CGFloat) -> Void
 
     @FocusState private var searchFocused: Bool
-    @FocusState private var pinciteFocused: Bool
-    /// True once the user has pressed ↓ to navigate results. In this mode → jumps to
-    /// the pincite; while still editing the query, → moves the text cursor instead.
-    @State private var isNavigating = false
 
     private var hasResults: Bool { !model.results.isEmpty }
 
     var body: some View {
         VStack(spacing: 8) {
             searchBar
+            // Popovers live in the layout flow (not as floating overlays) so the panel
+            // grows to fit them — otherwise, with no results, the short panel clips them.
+            if model.showingSignalPicker {
+                SignalPicker(signals: AppSettings.shared.signals, onChoose: { chosen in
+                    model.signal = chosen
+                    model.showingSignalPicker = false
+                    searchFocused = true
+                }, onCancel: {
+                    model.showingSignalPicker = false
+                    searchFocused = true
+                })
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if model.showingCiteOptions {
+                CiteOptionsPopover(
+                    pincite: $model.pincite,
+                    parenthetical: $model.parenthetical,
+                    onCommit: { if model.addCurrentCite() { searchFocused = true } },
+                    onClose: { model.showingCiteOptions = false; searchFocused = true }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if hasResults {
                 resultsCard
+            } else if let msg = model.statusMessage {
+                // No results yet: surface progress/errors here, since the footer (which
+                // also shows statusMessage) only exists once the results card appears.
+                // Without this, a slow request leaves the pill looking frozen.
+                statusPill(msg)
             }
         }
         .padding(20) // breathing room so the drop shadow isn't clipped
         .fixedSize(horizontal: false, vertical: true)
-        .overlay(alignment: .topLeading) {
-            if model.showingSignalPicker {
-                SignalPicker(signals: AppSettings.shared.signals) { chosen in
-                    model.signal = chosen
-                    model.showingSignalPicker = false
-                    searchFocused = true
-                }
-                .padding(.horizontal, 20)
-                .offset(y: 76)
-            }
-        }
         .background(heightReader)
         .onAppear { searchFocused = true }
         .onChange(of: model.showCount) { _, _ in
-            pinciteFocused = false
             searchFocused = true
-            isNavigating = false
         }
     }
 
@@ -62,25 +72,32 @@ struct SearchView: View {
             Image(systemName: "books.vertical.fill")
                 .font(.title2)
                 .foregroundStyle(.secondary)
-            TextField("Search a case…", text: Binding(
+            ForEach(model.pendingCites) { cite in
+                citeBubble(cite)
+            }
+            if let signal = model.signal, !signal.text.isEmpty {
+                signalChip(signal.text)
+            }
+            TextField(model.pendingCites.isEmpty ? "Search a case…" : "Add another cite…", text: Binding(
                 get: { model.query },
-                // Typing returns to editing mode, so arrows move the cursor again.
-                set: { isNavigating = false; model.queryChanged($0) }
+                set: { model.queryChanged($0) }
             ))
             .textFieldStyle(.plain)
             .font(.title2)
             .focused($searchFocused)
-            .onKeyPress(.upArrow) { isNavigating = true; model.moveSelection(by: -1); return .handled }
-            .onKeyPress(.downArrow) { isNavigating = true; model.moveSelection(by: 1); return .handled }
-            .onKeyPress(.return) { commit(); return .handled }
-            .onKeyPress(.tab) { pinciteFocused = true; return .handled }
+            .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }
+            .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
+            .onKeyPress(keys: [.return]) { press in handleReturn(shift: press.modifiers.contains(.shift)) }
             .onKeyPress(.rightArrow) {
-                // In navigation mode (after ↓), → jumps to the pincite. While editing,
-                // let → move the text cursor as usual.
-                guard isNavigating, hasResults else { return .ignored }
-                pinciteFocused = true
+                // Once there are results, → opens the cite-options popover (pincite +
+                // parenthetical). With no results, let → move the text cursor as usual.
+                guard hasResults else { return .ignored }
+                model.showingCiteOptions = true
                 return .handled
             }
+            // NOTE: Backspace-on-empty (delete the preceding bubble) is handled by a
+            // local NSEvent monitor in AppDelegate — a focused TextField's field editor
+            // swallows ⌫ before SwiftUI's onKeyPress(.delete) can see it.
             .onKeyPress(.escape) {
                 // First Esc clears the query; a second (empty) Esc falls through to
                 // the panel's cancelOperation, which dismisses.
@@ -101,6 +118,53 @@ struct SearchView: View {
         .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
     }
 
+    /// Inline confirmation that a Bluebook signal is active, sitting in the pill ahead
+    /// of the query (italic, like the signal will render). Click to clear it; ⌃S still
+    /// reopens the picker to change it.
+    private func signalChip(_ text: String) -> some View {
+        Button {
+            model.signal = nil
+            searchFocused = true
+        } label: {
+            HStack(spacing: 5) {
+                Text(text).italic()
+                Image(systemName: "xmark.circle.fill").font(.caption)
+            }
+            .font(.title3)
+            .foregroundStyle(.white)
+            .padding(.leading, 12).padding(.trailing, 9)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color.accentColor))
+        }
+        .buttonStyle(.plain)
+        .help("Click to clear signal (⌃S to change)")
+        .fixedSize()
+    }
+
+    /// A committed cite, shown as a neutral bubble in the pill ahead of the query
+    /// (distinct from the accent signal chip). Click to remove it from the string cite.
+    private func citeBubble(_ cite: PendingCite) -> some View {
+        Button {
+            model.removeCite(cite.id)
+            searchFocused = true
+        } label: {
+            HStack(spacing: 5) {
+                if let sig = cite.signalText { Text(sig).italic() }
+                Text(cite.label).lineLimit(1).truncationMode(.tail)
+                Image(systemName: "xmark.circle.fill").font(.caption)
+            }
+            .font(.title3)
+            .foregroundStyle(.primary)
+            .padding(.leading, 12).padding(.trailing, 9)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(.quaternary))
+        }
+        .buttonStyle(.plain)
+        .help("Click to remove from the citation")
+        .frame(maxWidth: 170)
+        .fixedSize()
+    }
+
     /// "…" menu for settings that don't belong on the keyboard-first path.
     private var optionsMenu: some View {
         Menu {
@@ -114,6 +178,24 @@ struct SearchView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .frame(width: 24)
+    }
+
+    /// Lightweight status row shown beneath the pill while there are no results —
+    /// a spinner for "Searching…", plain text for "No results"/errors.
+    private func statusPill(_ msg: String) -> some View {
+        HStack(spacing: 8) {
+            if msg == "Searching…" {
+                ProgressView().controlSize(.small)
+            }
+            Text(msg).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 18).fill(.regularMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.quaternary, lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
     }
 
     // MARK: results card
@@ -155,28 +237,21 @@ struct SearchView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            if let signal = model.signal {
-                Text(signal.text).italic().foregroundStyle(.secondary)
-            }
-            Text("pincite").foregroundStyle(.secondary)
-            TextField("page", text: $model.pincite)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 80)
-                .focused($pinciteFocused)
-                .onKeyPress(.return) { commit(); return .handled }
-                .onKeyPress(.leftArrow) {
-                    // ← from an empty pincite hops back to the search field.
-                    guard model.pincite.isEmpty else { return .ignored }
-                    searchFocused = true
-                    return .handled
-                }
+            // Signal lives in the pill chip; pincite/parenthetical live in the → popover.
             Spacer()
             if let msg = model.statusMessage {
                 Text(msg).foregroundStyle(.orange)
             }
-            Text("⌃S signal · ⏎ insert · esc").font(.caption).foregroundStyle(.tertiary)
+            Text(footerHint).font(.caption).foregroundStyle(.tertiary)
         }
         .padding(12)
+    }
+
+    /// Keyboard cheat-sheet; wording shifts once cites are accumulating.
+    private var footerHint: String {
+        model.pendingCites.isEmpty
+            ? "→ pincite · ⌃S signal · ⏎ add · ⇧⏎ insert"
+            : "→ pincite · ⏎ add · ⇧⏎ / ⏎ again to insert"
     }
 
     // MARK: helpers
@@ -191,9 +266,71 @@ struct SearchView: View {
         }
     }
 
-    private func commit() {
-        if let rich = model.formatSelected() {
+    /// ⏎ / ⇧⏎ semantics for the string-cite builder:
+    ///  • a result is selected → add it as a bubble (⇧⏎ also inserts right away)
+    ///  • nothing to add but cites are queued → insert the string citation
+    private func handleReturn(shift: Bool) -> KeyPress.Result {
+        if hasResults {
+            if model.addCurrentCite() {
+                searchFocused = true
+                if shift { finalize() }
+            }
+            return .handled
+        }
+        if !model.pendingCites.isEmpty {
+            finalize()
+        }
+        return .handled
+    }
+
+    private func finalize() {
+        if let rich = model.finalizeCitation() {
             onInsert(rich)
+        }
+    }
+}
+
+/// The → cite-options popover: pincite + explanatory parenthetical for the current
+/// selection. ⇥ moves between fields, ⏎ adds the cite (closing the popover), Esc
+/// closes without adding. An in-panel overlay (not a real popover) so it doesn't
+/// resign the floating panel's key state and dismiss it.
+private struct CiteOptionsPopover: View {
+    @Binding var pincite: String
+    @Binding var parenthetical: String
+    var onCommit: () -> Void
+    var onClose: () -> Void
+
+    @FocusState private var field: Field?
+    private enum Field { case pincite, parenthetical }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            labeledField("Pincite", placeholder: "page, e.g. 483", text: $pincite, field: .pincite)
+            labeledField("Parenthetical", placeholder: "e.g. en banc", text: $parenthetical, field: .parenthetical)
+            Text("⏎ add cite · ⇥ next field · esc")
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .frame(width: 320)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
+        .onAppear { field = .pincite }
+    }
+
+    private func labeledField(_ label: String, placeholder: String, text: Binding<String>, field which: Field) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .focused($field, equals: which)
+                .onKeyPress(.return) { onCommit(); return .handled }
+                .onKeyPress(.tab) {
+                    field = (which == .pincite) ? .parenthetical : .pincite
+                    return .handled
+                }
+                .onKeyPress(.escape) { onClose(); return .handled }
         }
     }
 }

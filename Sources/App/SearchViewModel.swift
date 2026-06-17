@@ -12,9 +12,17 @@ final class SearchViewModel: ObservableObject {
     @Published var results: [SearchResult] = []
     @Published var selection: Int = 0
     @Published var pincite: String = ""
+    /// Explanatory parenthetical for the in-progress cite (e.g. "en banc"), entered in
+    /// the → cite-options popover. Baked into the bubble when the cite is added.
+    @Published var parenthetical: String = ""
     @Published var signal: Signal? = nil
     @Published var statusMessage: String? = nil
     @Published var showingSignalPicker = false
+    /// The → cite-options popover (pincite + parenthetical for the current selection).
+    @Published var showingCiteOptions = false
+    /// Cites already committed to the string citation, shown as bubbles in the pill.
+    /// Empty = single-cite mode (⏎ inserts immediately).
+    @Published var pendingCites: [PendingCite] = []
     /// Bumped each time the panel is (re)shown so the view re-focuses the search
     /// field — `.onAppear` only fires once, but the panel is reused across shows.
     @Published var showCount = 0
@@ -56,6 +64,7 @@ final class SearchViewModel: ObservableObject {
         let trimmed = newValue.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else {
             results = []
+            statusMessage = nil   // don't leave a stale "No results"/error pill up
             return
         }
         searchTask = Task { [weak self] in
@@ -92,6 +101,50 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
+    // MARK: multi-cite (string citation) assembly
+
+    /// Format the current selection (with its signal/pincite/parenthetical) and push it
+    /// onto the string citation as a bubble, then reset for the next cite. Returns false
+    /// — leaving everything in place — if the selection can't be formatted (the failure
+    /// is surfaced via `statusMessage`).
+    @discardableResult
+    func addCurrentCite() -> Bool {
+        guard let rich = formatSelected() else { return false }
+        let label = selectedRecord?.name ?? "cite"
+        // Capture the signal onto the bubble so it stays visible after the chip clears.
+        let signalText = (signal?.text).flatMap { $0.isEmpty ? nil : $0 }
+        pendingCites.append(PendingCite(label: label, signalText: signalText, rich: rich))
+        resetCurrentCite()
+        return true
+    }
+
+    /// Join the accumulated cites into one Bluebook string citation and clear the list.
+    /// Nil when nothing has been added yet.
+    func finalizeCitation() -> RichText? {
+        guard !pendingCites.isEmpty else { return nil }
+        let rich = CaseCitation.stringCitation(pendingCites.map(\.rich))
+        pendingCites = []
+        return rich
+    }
+
+    func removeCite(_ id: PendingCite.ID) {
+        pendingCites.removeAll { $0.id == id }
+    }
+
+    /// Clear the in-progress query/selection/options so the next cite starts fresh.
+    /// Leaves `pendingCites` intact.
+    private func resetCurrentCite() {
+        searchTask?.cancel()
+        query = ""
+        results = []
+        selection = 0
+        signal = nil
+        pincite = ""
+        parenthetical = ""
+        statusMessage = nil
+        showingCiteOptions = false
+    }
+
     // MARK: formatting
 
     /// Format the selected result, or nil if it can't yield a valid full cite
@@ -101,7 +154,8 @@ final class SearchViewModel: ObservableObject {
         let opts = CaseCitation.Options(
             style: AppSettings.shared.style,
             signal: signal,
-            pincite: pincite.isEmpty ? nil : pincite
+            pincite: pincite.isEmpty ? nil : pincite,
+            parenthetical: parenthetical.isEmpty ? nil : parenthetical
         )
         do {
             return try CaseCitation.format(record, options: opts)
@@ -113,5 +167,16 @@ final class SearchViewModel: ObservableObject {
             return nil
         }
     }
+}
+
+/// One committed cite in a string citation: its display label (the case name, shown in
+/// the bubble) and the fully-formatted `RichText` that gets joined at insert time.
+struct PendingCite: Identifiable {
+    let id = UUID()
+    let label: String
+    /// The signal applied to this cite (if any), shown italic in the bubble so the
+    /// signal stays visible after its blue chip clears on commit.
+    let signalText: String?
+    let rich: RichText
 }
 #endif

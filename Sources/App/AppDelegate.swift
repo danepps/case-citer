@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: SearchPanel?
     private var model: SearchViewModel?
     private var priorApp: NSRunningApplication?
+    private var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // no Dock icon (also set LSUIElement)
@@ -24,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setUpMainMenu()
         setUpMenuBar()
         setUpPanel()
+        installBackspaceMonitor()
 
         KeyboardShortcuts.onKeyUp(for: .summon) { [weak self] in
             // KeyboardShortcuts dispatches this on the main thread via its Carbon
@@ -78,6 +80,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = SearchPanel(rootView: view)
     }
 
+    /// Make Backspace peel off the bubble before the cursor when the query is empty
+    /// (the signal chip first, then the most recent cite). A focused TextField's field
+    /// editor consumes ⌫ before SwiftUI's `onKeyPress` sees it, so we catch it here, at
+    /// the AppKit level, before it reaches the editor. Returning nil swallows the event;
+    /// returning it lets the field delete a character as usual.
+    private func installBackspaceMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let keyCode = event.keyCode   // pull the scalar out so NSEvent doesn't cross the actor hop
+            let consume = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let model = self.model, self.panel?.isKeyWindow == true,
+                      keyCode == 51,                        // kVK_Delete (Backspace)
+                      model.query.isEmpty,                  // not mid-edit
+                      !model.showingCiteOptions, !model.showingSignalPicker  // not in a popover field
+                else { return false }
+                if model.signal != nil { model.signal = nil; return true }
+                if let last = model.pendingCites.last { model.removeCite(last.id); return true }
+                return false
+            }
+            return consume ? nil : event
+        }
+    }
+
     @objc private func togglePanel() {
         guard let panel else { return }
         if panel.isVisible {
@@ -90,8 +114,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model?.query = ""
         model?.results = []
         model?.pincite = ""
+        model?.parenthetical = ""
         model?.signal = nil
         model?.statusMessage = nil
+        model?.pendingCites = []
+        model?.showingCiteOptions = false
         model?.showCount += 1 // re-focus the search field (see SearchView)
         NSApp.activate(ignoringOtherApps: true)
         panel.positionTopCentered()

@@ -8,6 +8,7 @@ import BluebookFormat
 struct SignalPicker: View {
     let signals: [Signal]
     var onChoose: (Signal) -> Void
+    var onCancel: () -> Void
 
     @State private var selection = 0
     @FocusState private var focused: Bool
@@ -38,6 +39,9 @@ struct SignalPicker: View {
         .onKeyPress(.upArrow) { selection = max(0, selection - 1); return .handled }
         .onKeyPress(.downArrow) { selection = min(ordered.count - 1, selection + 1); return .handled }
         .onKeyPress(.return) { onChoose(ordered[selection]); return .handled }
+        // Esc closes the picker only — consume it so it doesn't fall through to the
+        // panel's cancelOperation and dismiss the whole search panel.
+        .onKeyPress(.escape) { onCancel(); return .handled }
     }
 }
 #endif

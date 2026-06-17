@@ -33,6 +33,39 @@ final class CaseCitationTests: XCTestCase {
         XCTAssertEqual(rt.plainText, "Obergefell v. Hodges, 576 U.S. 644, 681 (2015).")
     }
 
+    // MARK: explanatory parenthetical
+
+    func testParenthetical() throws {
+        let opts = CaseCitation.Options(style: .lawReview, pincite: "681", parenthetical: "en banc")
+        let rt = try CaseCitation.format(obergefell(), options: opts)
+        XCTAssertEqual(rt.plainText, "Obergefell v. Hodges, 576 U.S. 644, 681 (2015) (en banc).")
+    }
+
+    func testParentheticalBlankIgnored() throws {
+        let opts = CaseCitation.Options(parenthetical: "   ")
+        let rt = try CaseCitation.format(obergefell(), options: opts)
+        XCTAssertEqual(rt.plainText, "Obergefell v. Hodges, 576 U.S. 644 (2015).")
+    }
+
+    // MARK: string citation (multi-cite)
+
+    func testStringCitationJoinsWithSemicolons() throws {
+        let a = try CaseCitation.format(obergefell())
+        let b = try CaseCitation.format(obergefell(), options: .init(pincite: "681"))
+        let joined = CaseCitation.stringCitation([a, b])
+        XCTAssertEqual(joined.plainText,
+            "Obergefell v. Hodges, 576 U.S. 644 (2015); Obergefell v. Hodges, 576 U.S. 644, 681 (2015).")
+    }
+
+    func testStringCitationSingleEqualsPlainCite() throws {
+        let a = try CaseCitation.format(obergefell())
+        XCTAssertEqual(CaseCitation.stringCitation([a]).plainText, a.plainText)
+    }
+
+    func testStringCitationEmptyIsEmpty() {
+        XCTAssertEqual(CaseCitation.stringCitation([]).plainText, "")
+    }
+
     // MARK: court-document mode italicizes the full name
 
     func testCourtDocumentNameIsItalic() throws {
