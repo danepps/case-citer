@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setUpMenuBar() {
         let item = NSStatusItem.let_make()
-        item.button?.image = NSImage(systemSymbolName: "quote.bubble", accessibilityDescription: "Case Citer")
+        item.button?.image = NSImage(systemSymbolName: "books.vertical.fill", accessibilityDescription: "Case Citer")
         let menu = NSMenu()
         menu.addItem(withTitle: "Search…", action: #selector(togglePanel), keyEquivalent: "")
         menu.addItem(.separator())
@@ -70,9 +70,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let client = SearchClient(apiKey: AppSettings.shared.apiKey)
         let model = SearchViewModel(client: client)
         self.model = model
-        let view = SearchView(model: model) { [weak self] rich in
-            self?.insert(rich)
-        }
+        let view = SearchView(
+            model: model,
+            onInsert: { [weak self] rich in self?.insert(rich) },
+            onHeightChange: { [weak self] height in self?.panel?.setContentHeight(height) }
+        )
         panel = SearchPanel(rootView: view)
     }
 
@@ -92,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model?.statusMessage = nil
         model?.showCount += 1 // re-focus the search field (see SearchView)
         NSApp.activate(ignoringOtherApps: true)
-        panel.center()
+        panel.positionTopCentered()
         panel.makeKeyAndOrderFront(nil)
     }
 

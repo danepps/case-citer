@@ -3,13 +3,14 @@ import AppKit
 import SwiftUI
 
 /// A nonactivating floating panel that can still become key (so its text field
-/// accepts typing) while the app runs as an agent. Spotlight-style: centered,
-/// borderless-ish, dismisses on Esc / resign-key.
+/// accepts typing) while the app runs as an agent. Spotlight-style: a rounded pill
+/// floating in the upper third, transparent background, auto-sized to its content
+/// (so results grow downward), dismisses on Esc / click-outside.
 final class SearchPanel: NSPanel {
 
     init(rootView: some View) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 120),
             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -23,6 +24,14 @@ final class SearchPanel: NSPanel {
         hidesOnDeactivate = false
         animationBehavior = .utilityWindow
 
+        // Transparent window so the SwiftUI rounded shapes define the visible chrome.
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false // SwiftUI draws the shadow on the rounded shapes instead
+        standardWindowButton(.closeButton)?.isHidden = true
+        standardWindowButton(.miniaturizeButton)?.isHidden = true
+        standardWindowButton(.zoomButton)?.isHidden = true
+
         let hosting = NSHostingView(rootView: rootView)
         contentView = hosting
     }
@@ -31,17 +40,32 @@ final class SearchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    func toggleCentered() {
-        if isVisible {
-            orderOut(nil)
-        } else {
-            center()
-            makeKeyAndOrderFront(nil)
-        }
+    /// Place the panel horizontally centered with its top edge ~18% down from the
+    /// top of the screen, so it (and the results below it) sit in the upper third.
+    func positionTopCentered() {
+        guard let screen = NSScreen.main else { center(); return }
+        let vf = screen.visibleFrame
+        let topY = vf.minY + vf.height * 0.82
+        var f = frame
+        f.origin.x = vf.minX + (vf.width - f.width) / 2
+        f.origin.y = topY - f.height
+        setFrame(f, display: true)
+    }
+
+    /// Resize to the content's natural height, keeping the top edge fixed so the
+    /// pill stays put while results expand/collapse beneath it.
+    func setContentHeight(_ height: CGFloat) {
+        let target = ceil(height)
+        guard target > 0, abs(frame.height - target) > 0.5 else { return }
+        var f = frame
+        let top = f.maxY
+        f.size.height = target
+        f.origin.y = top - target
+        setFrame(f, display: true)
     }
 
     override func cancelOperation(_ sender: Any?) {
-        orderOut(nil) // Esc dismisses
+        orderOut(nil) // Esc dismisses (after the field is already empty)
     }
 
     /// Spotlight-style: clicking anywhere outside the panel (which resigns key)
