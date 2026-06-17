@@ -8,6 +8,7 @@ import KeyboardShortcuts
 /// Agent (LSUIElement) app delegate: owns the menu-bar item, the global hotkey,
 /// and the floating search panel. Captures the frontmost app before showing the
 /// panel so paste-back can restore focus.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: SearchPanel?
@@ -24,7 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setUpPanel()
 
         KeyboardShortcuts.onKeyUp(for: .summon) { [weak self] in
-            self?.togglePanel()
+            // KeyboardShortcuts dispatches this on the main thread via its Carbon
+            // event handler, so it is safe to assume MainActor isolation here.
+            MainActor.assumeIsolated {
+                self?.togglePanel()
+            }
         }
     }
 
