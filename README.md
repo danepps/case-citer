@@ -51,20 +51,67 @@ swift run case-citer       # launches the agent (macOS)
 
 ### Running the agent locally
 
-The app needs:
+For the **real `.app`** (with the bundle id launch-at-login needs, no Dock icon, and
+the paste-back permission prompt), build the native Xcode app target. The project is
+generated from `project.yml` by [XcodeGen](https://github.com/yonaskolb/XcodeGen) —
+`CaseCiter.xcodeproj` is disposable/git-ignored, `project.yml` is the source of truth:
 
-1. A bundle **Info.plist** declaring `LSUIElement = true` (no Dock icon) and
-   `NSAppleEventsUsageDescription`. `swift run` produces a bare executable, so for the
-   real agent wrap it in an `.app` bundle (Xcode app target, or a small bundling
-   script) with that Info.plist.
-2. The **Accessibility** permission (System Settings ▸ Privacy & Security ▸
+```sh
+brew install xcodegen          # once
+xcodegen generate              # regenerate CaseCiter.xcodeproj after editing project.yml
+open CaseCiter.xcodeproj       # then Run (⌘R), or Product ▸ Archive to export
+# …or headless:
+xcodebuild -project CaseCiter.xcodeproj -scheme CaseCiter -configuration Debug build
+```
+
+The build is **ad-hoc signed** for local use; drag `CaseCiter.app` to `/Applications`
+to install. For more reliable launch-at-login, open the project in Xcode once and let it
+manage signing with your Apple ID (the Apple Development cert). The app target reuses the
+SwiftPM sources directly and bundles `scotus-index.json`; `swift build`/`swift run`/
+`swift test` still work for the fast logic loop.
+
+The app also needs:
+
+1. The **Accessibility** permission (System Settings ▸ Privacy & Security ▸
    Accessibility) — required to synthesize ⌘V for paste-back. The app prompts on first
    launch via `AXIsProcessTrustedWithOptions`.
-3. A free **CourtListener API token** (Settings) for higher rate limits; anonymous
+2. A free **CourtListener API token** (Settings) for higher rate limits; anonymous
    search works but is throttled.
+
+Open **Settings** from the menu-bar icon or the gear button in the search pill
+(⌘,). It holds: launch-at-login, the summon hotkey recorder, the citation-style
+choice, and the API token. **Launch at login** uses `SMAppService.mainApp`, which
+requires a real `.app` bundle with a bundle identifier — under a bare `swift run`
+binary the toggle has no bundle to register and reverts.
 
 Distribution is **local-first** for now (ad-hoc sign, right-click ▸ Open to bypass
 Gatekeeper). Notarized-DMG distribution is a later decision.
+
+## Local SCOTUS index (offline-first)
+
+The app ships a prebuilt index of the most-cited Supreme Court cases
+(`Sources/App/Resources/scotus-index.json`). A query shows matching cached cases
+**instantly and offline** (*Roe*, *Obergefell*, *Marbury*, …), then the live
+CourtListener search runs and is **merged in**: results are de-duplicated and
+relevance-ranked by name match, so a better web hit (or a lower-court case the
+SCOTUS-only index doesn't carry) can rise above — or fill in below — the cache. Each
+record is a `CourtListener.SearchResult`, so a cached hit runs through the identical
+citeable → `CaseRecord` → formatter path as a network result. If the network fails,
+the cached results stay on screen.
+
+Rebuild/refresh the index with:
+
+```sh
+python3 Tools/build-scotus-index.py [LIMIT]   # default 20000; reuses the app's API token
+```
+
+It pages CL's search API by citation count (the SCOTUS corpus is ~500k opinions, almost
+all obscure orders — the most-cited slice is a few MB and covers what anyone cites),
+respects the 429 throttle, and checkpoints as it goes. Validate without the GUI:
+
+```sh
+.build/debug/case-citer --query "roe wade"     # prints local-index matches + cites
+```
 
 ## Keyboard-only flow
 

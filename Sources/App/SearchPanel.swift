@@ -54,14 +54,23 @@ final class SearchPanel: NSPanel {
 
     /// Resize to the content's natural height, keeping the top edge fixed so the
     /// pill stays put while results expand/collapse beneath it.
+    ///
+    /// The height is reported from a SwiftUI `GeometryReader`, i.e. from *inside* a
+    /// layout pass — resizing the window synchronously there trips AppKit's
+    /// "-layoutSubtreeIfNeeded … already being laid out" recursion warning. Hop to the
+    /// next runloop tick so the frame change lands after the current pass completes;
+    /// the delay is sub-frame and imperceptible.
     func setContentHeight(_ height: CGFloat) {
         let target = ceil(height)
         guard target > 0, abs(frame.height - target) > 0.5 else { return }
-        var f = frame
-        let top = f.maxY
-        f.size.height = target
-        f.origin.y = top - target
-        setFrame(f, display: true)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, abs(self.frame.height - target) > 0.5 else { return }
+            var f = self.frame
+            let top = f.maxY
+            f.size.height = target
+            f.origin.y = top - target
+            self.setFrame(f, display: true)
+        }
     }
 
     override func cancelOperation(_ sender: Any?) {

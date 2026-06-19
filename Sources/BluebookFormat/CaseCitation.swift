@@ -69,20 +69,43 @@ public enum CaseCitation {
         return out
     }
 
-    /// Join already-formatted single citations into one Bluebook **string citation**:
-    /// the individual cites are separated by "; " and the whole gets one terminal
-    /// period. Each input is expected to be a complete cite ending in a period (as
-    /// `format` produces); that trailing period is dropped before joining so we don't
-    /// get "...(1973).; ...". Signals stay inline on their own cite as the caller
-    /// formatted them — this does not re-case them or split into separate sentences.
-    public static func stringCitation(_ cites: [RichText]) -> RichText {
+    /// One member of a string citation: the fully-formatted cite plus whether it
+    /// begins a new citation sentence (i.e. carries a *capitalized* signal). That
+    /// flag controls how it joins to the cite before it — see `stringCitation`.
+    public struct Member {
+        public var rich: RichText
+        public var beginsNewSentence: Bool
+        public init(_ rich: RichText, beginsNewSentence: Bool = false) {
+            self.rich = rich
+            self.beginsNewSentence = beginsNewSentence
+        }
+    }
+
+    /// Join already-formatted single citations into one Bluebook **string citation**.
+    /// Members normally chain within a single citation sentence, separated by "; ",
+    /// with one terminal period on the whole string. But a member that *begins a new
+    /// sentence* (a capitalized signal) ends the preceding cite with a period instead
+    /// — so "See A; B" stays one sentence, while a capitalized "But see" on the second
+    /// cite yields "See A. But see B." (Bluebook Rule 1.2–1.3).
+    ///
+    /// Each input is expected to be a complete cite ending in a period (as `format`
+    /// produces); that trailing period is dropped before joining so we don't get
+    /// "...(1973).; ...". Signals stay inline on their own cite as the caller cased
+    /// them — this does not re-case them.
+    public static func stringCitation(_ members: [Member]) -> RichText {
         var out = RichText()
-        for (i, cite) in cites.enumerated() {
-            if i > 0 { out.append("; ") }
-            out.append(trimmingTrailingPeriod(cite))
+        for (i, member) in members.enumerated() {
+            if i > 0 { out.append(member.beginsNewSentence ? ". " : "; ") }
+            out.append(trimmingTrailingPeriod(member.rich))
         }
         if !out.runs.isEmpty { out.append(".") }
         return out
+    }
+
+    /// Convenience overload for callers without per-cite sentence info: joins every
+    /// member with "; " (a single citation sentence).
+    public static func stringCitation(_ cites: [RichText]) -> RichText {
+        stringCitation(cites.map { Member($0) })
     }
 
     private static func trimmingTrailingPeriod(_ cite: RichText) -> RichText {

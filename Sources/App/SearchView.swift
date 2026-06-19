@@ -17,6 +17,8 @@ struct SearchView: View {
     var onInsert: (RichText) -> Void
     /// Reports the content's natural height so the panel can size itself to fit.
     var onHeightChange: (CGFloat) -> Void
+    /// Opens the Settings window (gear button in the pill).
+    var onOpenSettings: () -> Void
 
     @FocusState private var searchFocused: Bool
 
@@ -28,7 +30,8 @@ struct SearchView: View {
             // Popovers live in the layout flow (not as floating overlays) so the panel
             // grows to fit them — otherwise, with no results, the short panel clips them.
             if model.showingSignalPicker {
-                SignalPicker(signals: AppSettings.shared.signals, onChoose: { chosen in
+                SignalPicker(lowercaseFirst: !model.pendingCites.isEmpty,
+                             onChoose: { chosen in
                     model.signal = chosen
                     model.showingSignalPicker = false
                     searchFocused = true
@@ -110,6 +113,7 @@ struct SearchView: View {
                 return .handled
             }
             optionsMenu
+            settingsButton
         }
         .padding(.horizontal, 24)
         .frame(height: 60)
@@ -178,6 +182,19 @@ struct SearchView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .frame(width: 24)
+    }
+
+    /// Gear button opening the Settings window (launch-at-login, hotkey, style, token).
+    /// Mouse-only affordance — the keyboard path never needs to leave the pill.
+    private var settingsButton: some View {
+        Button(action: onOpenSettings) {
+            Image(systemName: "gearshape")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Settings")
+        .fixedSize()
     }
 
     /// Lightweight status row shown beneath the pill while there are no results —

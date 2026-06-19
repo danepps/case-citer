@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var model: SearchViewModel?
     private var priorApp: NSRunningApplication?
     private var keyMonitor: Any?
+    private let preferences = PreferencesWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // no Dock icon (also set LSUIElement)
@@ -61,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(systemSymbolName: "books.vertical.fill", accessibilityDescription: "Case Citer")
         let menu = NSMenu()
         menu.addItem(withTitle: "Search…", action: #selector(togglePanel), keyEquivalent: "")
+        menu.addItem(withTitle: "Settings…", action: #selector(showPreferences), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.items.forEach { $0.target = self }
@@ -75,7 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = SearchView(
             model: model,
             onInsert: { [weak self] rich in self?.insert(rich) },
-            onHeightChange: { [weak self] height in self?.panel?.setContentHeight(height) }
+            onHeightChange: { [weak self] height in self?.panel?.setContentHeight(height) },
+            onOpenSettings: { [weak self] in self?.showPreferences() }
         )
         panel = SearchPanel(rootView: view)
     }
@@ -100,6 +103,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return consume ? nil : event
         }
+    }
+
+    /// Open the Settings window. Dismiss the floating panel first if it's up (clicking
+    /// the gear in the pill, or the menu-bar item) so focus moves cleanly to Settings.
+    @objc private func showPreferences() {
+        panel?.orderOut(nil)
+        preferences.show()
     }
 
     @objc private func togglePanel() {

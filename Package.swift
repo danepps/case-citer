@@ -33,8 +33,12 @@ let package = Package(
                 "BluebookFormat",
                 "CourtListener",
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
-            ]
+            ],
+            // Prebuilt top-by-citation SCOTUS index (see Tools/build-scotus-index.py),
+            // searched locally so landmark cases resolve instantly and offline.
+            resources: [.copy("Resources/scotus-index.json")]
         ),
         .testTarget(name: "BluebookFormatTests", dependencies: ["BluebookFormat"]),
+        .testTarget(name: "CourtListenerTests", dependencies: ["CourtListener"]),
     ]
 )

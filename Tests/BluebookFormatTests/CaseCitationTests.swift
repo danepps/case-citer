@@ -57,13 +57,38 @@ final class CaseCitationTests: XCTestCase {
             "Obergefell v. Hodges, 576 U.S. 644 (2015); Obergefell v. Hodges, 576 U.S. 644, 681 (2015).")
     }
 
+    func testStringCitationCapitalizedSignalStartsNewSentence() throws {
+        // Cite 1 ("See …") and cite 2 carrying a capitalized "But see" — the second
+        // begins a new citation sentence, so cite 1 ends with a period, not "; ".
+        let a = try CaseCitation.format(obergefell(), options: .init(signal: Signal("see").capitalized))
+        let b = try CaseCitation.format(obergefell(), options: .init(signal: Signal("but see").capitalized, pincite: "681"))
+        let joined = CaseCitation.stringCitation([
+            CaseCitation.Member(a),
+            CaseCitation.Member(b, beginsNewSentence: true),
+        ])
+        XCTAssertEqual(joined.plainText,
+            "See Obergefell v. Hodges, 576 U.S. 644 (2015). But see Obergefell v. Hodges, 576 U.S. 644, 681 (2015).")
+    }
+
+    func testStringCitationLowercaseContinuationUsesSemicolon() throws {
+        // A lowercase signal on cite 2 keeps it in the same sentence: "; " separator.
+        let a = try CaseCitation.format(obergefell(), options: .init(signal: Signal("see").capitalized))
+        let b = try CaseCitation.format(obergefell(), options: .init(signal: Signal("see also"), pincite: "681"))
+        let joined = CaseCitation.stringCitation([
+            CaseCitation.Member(a),
+            CaseCitation.Member(b, beginsNewSentence: false),
+        ])
+        XCTAssertEqual(joined.plainText,
+            "See Obergefell v. Hodges, 576 U.S. 644 (2015); see also Obergefell v. Hodges, 576 U.S. 644, 681 (2015).")
+    }
+
     func testStringCitationSingleEqualsPlainCite() throws {
         let a = try CaseCitation.format(obergefell())
         XCTAssertEqual(CaseCitation.stringCitation([a]).plainText, a.plainText)
     }
 
     func testStringCitationEmptyIsEmpty() {
-        XCTAssertEqual(CaseCitation.stringCitation([]).plainText, "")
+        XCTAssertEqual(CaseCitation.stringCitation([] as [RichText]).plainText, "")
     }
 
     // MARK: court-document mode italicizes the full name

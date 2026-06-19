@@ -19,11 +19,17 @@ public final class SearchClient {
 
     private let apiKey: String?
     private let session: URLSession
+    private let cache: SearchCache?
     private let base = URL(string: "https://www.courtlistener.com/api/rest/v4/search/")!
 
-    public init(apiKey: String?, session: URLSession? = nil) {
+    /// - Parameter cache: result cache (defaults to a disk-backed one). Pass `nil`
+    ///   to disable caching — e.g. in tests that assert on live network behavior.
+    public init(apiKey: String?,
+                session: URLSession? = nil,
+                cache: SearchCache? = SearchCache(diskURL: SearchCache.defaultDiskURL())) {
         self.apiKey = apiKey
         self.session = session ?? Self.makeSession()
+        self.cache = cache
     }
 
     /// Dedicated session for talking to CourtListener (behind a CDN, AWS CloudFront).
@@ -48,9 +54,17 @@ public final class SearchClient {
     /// if the name search is empty (topical query or a typo). Throws on transport or
     /// non-2xx responses so the panel can surface "offline" / "rate limited".
     public func searchOpinions(_ query: String) async throws -> [SearchResult] {
+        let key = SearchCache.key(for: query)
+        if let cached = await cache?.value(for: key) {
+            return cached
+        }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         let byName = try await fetch(q: Self.buildQuery(trimmed))
-        return byName.isEmpty ? try await fetch(q: trimmed) : byName
+        let results = byName.isEmpty ? try await fetch(q: trimmed) : byName
+        // Only successful (non-throwing) responses reach here, so an empty result is a
+        // genuine "no match" worth caching to avoid re-querying typos.
+        await cache?.store(results, for: key)
+        return results
     }
 
     private func fetch(q: String) async throws -> [SearchResult] {

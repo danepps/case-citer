@@ -2,20 +2,29 @@
 import SwiftUI
 import BluebookFormat
 
-/// Keyboard-navigable signal overlay (⌃S). Shows each signal in italic preview,
-/// capitalized variant first (for sentence-initial use) then lowercase — matching
-/// the bluebook-signals plugin's ordering. ↑/↓ to move, ⏎ to choose, Esc to close.
+/// Keyboard-navigable signal overlay (⌃S). Shows each signal in italic preview.
+/// For the first cite a curated set of capitalized (sentence-initial) signals leads,
+/// followed by the lowercase continuation order; for a later cite in a string citation
+/// the lowercase continuation order leads (signals after the first typically stay
+/// lowercase within one citation sentence), then the same list capitalized.
+/// ↑/↓ to move, ⏎ to choose, Esc to close.
 struct SignalPicker: View {
-    let signals: [Signal]
+    /// When true (a non-first cite), surface the lowercase variants on top.
+    var lowercaseFirst: Bool = false
     var onChoose: (Signal) -> Void
     var onCancel: () -> Void
 
     @State private var selection = 0
     @FocusState private var focused: Bool
 
-    /// Capitalized variants first, then lowercase — same as the plugin.
     private var ordered: [Signal] {
-        signals.map(\.capitalized) + signals
+        if lowercaseFirst {
+            // Continuation cite: a curated lowercase-led order, then the same capitalized.
+            let base = Signal.continuationOrder
+            return base + base.map(\.capitalized)
+        }
+        // First cite: curated capitalized signals lead, then the lowercase continuation order.
+        return Signal.firstCiteLeading + Signal.continuationOrder
     }
 
     var body: some View {

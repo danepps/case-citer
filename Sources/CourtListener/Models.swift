@@ -8,7 +8,7 @@ public struct SearchResponse: Decodable {
     public let results: [SearchResult]
 }
 
-public struct SearchResult: Decodable {
+public struct SearchResult: Codable {
     public let caseName: String?
     public let court: String?
     public let courtId: String?
