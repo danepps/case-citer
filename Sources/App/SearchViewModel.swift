@@ -23,6 +23,23 @@ final class SearchViewModel: ObservableObject {
     /// Cites already committed to the string citation, shown as bubbles in the pill.
     /// Empty = single-cite mode (⏎ inserts immediately).
     @Published var pendingCites: [PendingCite] = []
+    /// Where keyboard focus sits among the committed cite bubbles, walked with ◀/▶ on an
+    /// empty query: `.none` is the text field; `.selected(i)` highlights a bubble (▼ opens
+    /// its pincite/parenthetical editor); `.ahead(i)` is the caret in front of a bubble
+    /// (⌃S attaches a signal there). ◀ steps text-field → selected(last) → ahead(last) →
+    /// selected(last-1) → … ; ▶ reverses it.
+    @Published var citeFocus: CiteFocus = .none
+    /// When set, the cite-options popover is editing this committed cite (vs. nil =
+    /// entering options for the in-progress cite being appended).
+    @Published var editingCiteIndex: Int? = nil
+
+    /// Index of the bubble currently under the cite cursor (selected or ahead), if any.
+    var focusedCiteIndex: Int? {
+        switch citeFocus {
+        case .none: return nil
+        case .selected(let i), .ahead(let i): return i
+        }
+    }
     /// Bumped each time the panel is (re)shown so the view re-focuses the search
     /// field — `.onAppear` only fires once, but the panel is reused across shows.
     @Published var showCount = 0
@@ -60,6 +77,7 @@ final class SearchViewModel: ObservableObject {
         // result selection to 0 and yank the user's pick out from under them.
         guard newValue != query else { return }
         query = newValue
+        citeFocus = .none   // typing returns the cursor to the text field
         searchTask?.cancel()
         let trimmed = newValue.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else {
@@ -180,17 +198,84 @@ final class SearchViewModel: ObservableObject {
     /// is surfaced via `statusMessage`).
     @discardableResult
     func addCurrentCite() -> Bool {
-        guard let rich = formatSelected() else { return false }
-        let label = selectedRecord?.name ?? "cite"
-        // Capture the signal onto the bubble so it stays visible after the chip clears.
-        let signalText = (signal?.text).flatMap { $0.isEmpty ? nil : $0 }
-        // A capitalized signal starts a new citation sentence: the preceding cite then
-        // ends in a period rather than a semicolon when the string is finalized.
-        let beginsNewSentence = signal?.isCapitalized ?? false
-        pendingCites.append(PendingCite(label: label, signalText: signalText,
-                                        beginsNewSentence: beginsNewSentence, rich: rich))
+        guard let record = selectedRecord, let rich = formatSelected() else { return false }
+        // Retain the signal and the formatting inputs so the cite can be re-formatted
+        // later if its signal/pincite/parenthetical are edited (they're baked into `rich`).
+        pendingCites.append(PendingCite(label: record.name, signal: signal, rich: rich,
+                                        record: record,
+                                        pincite: pincite.isEmpty ? nil : pincite,
+                                        parenthetical: parenthetical.isEmpty ? nil : parenthetical))
         resetCurrentCite()
         return true
+    }
+
+    // MARK: cite cursor (edit an already-committed cite)
+
+    /// Whether the signal picker should lead with lowercase (continuation) signals:
+    /// true for any cite after the first — whether that's the cursor-focused committed
+    /// cite or the in-progress one being appended.
+    var signalPickerLowercaseFirst: Bool {
+        (focusedCiteIndex ?? pendingCites.count) > 0
+    }
+
+    /// ◀ on an empty query: text field → select last bubble → in front of it → select the
+    /// previous bubble → … (stops at the front of the first cite).
+    func moveCiteCursorLeft() {
+        guard !pendingCites.isEmpty else { return }
+        switch citeFocus {
+        case .none:               citeFocus = .selected(pendingCites.count - 1)
+        case .selected(let i):    citeFocus = .ahead(i)
+        case .ahead(let i):       if i > 0 { citeFocus = .selected(i - 1) }
+        }
+    }
+
+    /// ▶: the reverse of ◀; stepping right past the last bubble returns to the text field.
+    func moveCiteCursorRight() {
+        switch citeFocus {
+        case .none:               break
+        case .ahead(let i):       citeFocus = .selected(i)
+        case .selected(let i):    citeFocus = (i + 1 >= pendingCites.count) ? .none : .ahead(i + 1)
+        }
+    }
+
+    /// ▼ on a selected cite: load its pincite/parenthetical into the editor and open the
+    /// options popover bound to that committed cite.
+    func beginEditingCiteOptions(at index: Int) {
+        guard pendingCites.indices.contains(index) else { return }
+        let cite = pendingCites[index]
+        pincite = cite.pincite ?? ""
+        parenthetical = cite.parenthetical ?? ""
+        editingCiteIndex = index
+        showingCiteOptions = true
+    }
+
+    /// Commit the editor's pincite/parenthetical back onto the cite being edited.
+    func applyCiteOptions(toCiteAt index: Int) {
+        guard pendingCites.indices.contains(index) else { return }
+        var cite = pendingCites[index]
+        cite.pincite = pincite.isEmpty ? nil : pincite
+        cite.parenthetical = parenthetical.isEmpty ? nil : parenthetical
+        if let rich = reformat(cite) { cite.rich = rich; pendingCites[index] = cite }
+    }
+
+    /// Re-format the cursor-focused cite with `signal` (or clear it), updating its bubble
+    /// text and the formatted `rich` joined at insert time.
+    func applySignalToFocusedCite(_ signal: Signal?) {
+        guard let index = focusedCiteIndex, pendingCites.indices.contains(index) else { return }
+        var cite = pendingCites[index]
+        cite.signal = signal
+        if let rich = reformat(cite) { cite.rich = rich; pendingCites[index] = cite }
+    }
+
+    /// Re-run the formatter for a committed cite from its retained inputs.
+    private func reformat(_ cite: PendingCite) -> RichText? {
+        let opts = CaseCitation.Options(
+            style: AppSettings.shared.style,
+            signal: cite.signal,
+            pincite: cite.pincite,
+            parenthetical: cite.parenthetical
+        )
+        return try? CaseCitation.format(cite.record, options: opts)
     }
 
     /// Join the accumulated cites into one Bluebook string citation and clear the list.
@@ -201,11 +286,13 @@ final class SearchViewModel: ObservableObject {
             CaseCitation.Member($0.rich, beginsNewSentence: $0.beginsNewSentence)
         })
         pendingCites = []
+        citeFocus = .none
         return rich
     }
 
     func removeCite(_ id: PendingCite.ID) {
         pendingCites.removeAll { $0.id == id }
+        citeFocus = .none
     }
 
     /// Clear the in-progress query/selection/options so the next cite starts fresh.
@@ -220,6 +307,8 @@ final class SearchViewModel: ObservableObject {
         parenthetical = ""
         statusMessage = nil
         showingCiteOptions = false
+        editingCiteIndex = nil
+        citeFocus = .none
     }
 
     // MARK: formatting
@@ -248,15 +337,31 @@ final class SearchViewModel: ObservableObject {
 
 /// One committed cite in a string citation: its display label (the case name, shown in
 /// the bubble) and the fully-formatted `RichText` that gets joined at insert time.
+/// Where keyboard focus sits among the committed cite bubbles (see `citeFocus`).
+enum CiteFocus: Equatable {
+    case none              // the text field
+    case selected(Int)     // bubble highlighted; ▼ edits its pincite/parenthetical
+    case ahead(Int)        // caret in front of the bubble; ⌃S attaches a signal
+}
+
 struct PendingCite: Identifiable {
     let id = UUID()
     let label: String
-    /// The signal applied to this cite (if any), shown italic in the bubble so the
-    /// signal stays visible after its blue chip clears on commit.
-    let signalText: String?
-    /// True when this cite's signal is capitalized (sentence-initial) — it begins a
-    /// new citation sentence, ending the preceding cite with a period not a semicolon.
-    let beginsNewSentence: Bool
-    let rich: RichText
+    /// The signal applied to this cite (if any). Mutable so a signal can be attached
+    /// after the fact via the cite cursor; drives the italic prefix shown in the bubble.
+    var signal: Signal?
+    var rich: RichText
+    /// Formatting inputs retained so the cite can be re-formatted when its signal,
+    /// pincite, or parenthetical is edited (they're baked into `rich`, not editable
+    /// in place).
+    let record: CaseRecord
+    var pincite: String?
+    var parenthetical: String?
+
+    /// The signal text shown italic in the bubble, or nil when there's no signal.
+    var signalText: String? { (signal?.text).flatMap { $0.isEmpty ? nil : $0 } }
+    /// A capitalized signal starts a new citation sentence: the preceding cite then ends
+    /// in a period rather than a semicolon when the string is finalized.
+    var beginsNewSentence: Bool { signal?.isCapitalized ?? false }
 }
 #endif

@@ -47,13 +47,12 @@ targets:
         # Local-first distribution: sign with the Development cert so SMAppService can
         # register a login item. Hardened runtime/sandbox stay off — the app posts ⌘V
         # into other apps (Accessibility) and must not be sandboxed.
-        # Ad-hoc sign for local-first distribution: no team/cert lookup, builds clean
-        # across the SwiftPM package deps, and runs on this machine. To sign with the
-        # Apple Development cert instead (cleaner for SMAppService login items), open
-        # CaseCiter.xcodeproj in Xcode once and let it manage signing with your Apple ID.
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
-        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
+        # Automatic signing with your Apple Development team — a stable signature that
+        # SMAppService (launch-at-login) accepts. Baked in here so `xcodegen generate`
+        # preserves it; the project is regenerated from this file, so signing set only
+        # in Xcode's GUI gets wiped on the next regenerate.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "82H77TF7AH"
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
         MARKETING_VERSION: "1.0"

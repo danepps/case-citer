@@ -30,9 +30,15 @@ struct SearchView: View {
             // Popovers live in the layout flow (not as floating overlays) so the panel
             // grows to fit them — otherwise, with no results, the short panel clips them.
             if model.showingSignalPicker {
-                SignalPicker(lowercaseFirst: !model.pendingCites.isEmpty,
+                SignalPicker(lowercaseFirst: model.signalPickerLowercaseFirst,
                              onChoose: { chosen in
-                    model.signal = chosen
+                    // Attach to the cursor-focused committed cite if there is one,
+                    // otherwise to the in-progress cite (the usual case).
+                    if model.focusedCiteIndex != nil {
+                        model.applySignalToFocusedCite(chosen)
+                    } else {
+                        model.signal = chosen
+                    }
                     model.showingSignalPicker = false
                     searchFocused = true
                 }, onCancel: {
@@ -45,8 +51,29 @@ struct SearchView: View {
                 CiteOptionsPopover(
                     pincite: $model.pincite,
                     parenthetical: $model.parenthetical,
-                    onCommit: { if model.addCurrentCite() { searchFocused = true } },
-                    onClose: { model.showingCiteOptions = false; searchFocused = true }
+                    onCommit: {
+                        if let i = model.editingCiteIndex {
+                            // Editing a committed cite: write the options back and keep it
+                            // selected so ◀/▶ keep working.
+                            model.applyCiteOptions(toCiteAt: i)
+                            model.editingCiteIndex = nil
+                            model.showingCiteOptions = false
+                            model.citeFocus = .selected(i)
+                        } else if model.addCurrentCite() {
+                            // empty editor / new cite path resets focus on its own
+                        }
+                        searchFocused = true
+                    },
+                    onClose: {
+                        // ▲ / esc: close without changing the cite; re-select it if we were
+                        // editing a committed one.
+                        if let i = model.editingCiteIndex {
+                            model.editingCiteIndex = nil
+                            model.citeFocus = .selected(i)
+                        }
+                        model.showingCiteOptions = false
+                        searchFocused = true
+                    }
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -61,6 +88,8 @@ struct SearchView: View {
         }
         .padding(20) // breathing room so the drop shadow isn't clipped
         .fixedSize(horizontal: false, vertical: true)
+        // Translucency on the whole pill + results so what's behind shows through.
+        .opacity(0.8)
         .background(heightReader)
         .onAppear { searchFocused = true }
         .onChange(of: model.showCount) { _, _ in
@@ -75,8 +104,9 @@ struct SearchView: View {
             Image(systemName: "books.vertical.fill")
                 .font(.title2)
                 .foregroundStyle(.secondary)
-            ForEach(model.pendingCites) { cite in
-                citeBubble(cite)
+            ForEach(Array(model.pendingCites.enumerated()), id: \.element.id) { index, cite in
+                if model.citeFocus == .ahead(index) { citeCursor }
+                citeBubble(cite, selected: model.citeFocus == .selected(index))
             }
             if let signal = model.signal, !signal.text.isEmpty {
                 signalChip(signal.text)
@@ -89,11 +119,30 @@ struct SearchView: View {
             .font(.title2)
             .focused($searchFocused)
             .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }
-            .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
+            .onKeyPress(.downArrow) {
+                // ▼ on a selected committed cite opens its pincite/parenthetical editor;
+                // otherwise it moves the result selection.
+                if case .selected(let i) = model.citeFocus {
+                    model.beginEditingCiteOptions(at: i)
+                    return .handled
+                }
+                model.moveSelection(by: 1)
+                return .handled
+            }
             .onKeyPress(keys: [.return]) { press in handleReturn(shift: press.modifiers.contains(.shift)) }
+            .onKeyPress(.leftArrow) {
+                // With an empty query, ◀ walks a "cite cursor" back through the committed
+                // bubbles so ⌃S can attach a signal to a specific one. With text in the
+                // field, let ◀ move the text cursor as usual.
+                guard model.query.isEmpty, !model.pendingCites.isEmpty else { return .ignored }
+                model.moveCiteCursorLeft()
+                return .handled
+            }
             .onKeyPress(.rightArrow) {
-                // Once there are results, → opens the cite-options popover (pincite +
-                // parenthetical). With no results, let → move the text cursor as usual.
+                // ▶ walks the cite cursor back toward (and into) the text field. Otherwise,
+                // once there are results, → opens the cite-options popover (pincite +
+                // parenthetical); with no results, let → move the text cursor as usual.
+                if model.citeFocus != .none { model.moveCiteCursorRight(); return .handled }
                 guard hasResults else { return .ignored }
                 model.showingCiteOptions = true
                 return .handled
@@ -102,8 +151,10 @@ struct SearchView: View {
             // local NSEvent monitor in AppDelegate — a focused TextField's field editor
             // swallows ⌫ before SwiftUI's onKeyPress(.delete) can see it.
             .onKeyPress(.escape) {
-                // First Esc clears the query; a second (empty) Esc falls through to
-                // the panel's cancelOperation, which dismisses.
+                // Esc first parks the cite cursor (if active), then clears the query;
+                // a final (empty) Esc falls through to the panel's cancelOperation, which
+                // dismisses.
+                if model.citeFocus != .none { model.citeFocus = .none; return .handled }
                 guard model.query.isEmpty else { model.queryChanged(""); return .handled }
                 return .ignored
             }
@@ -145,9 +196,19 @@ struct SearchView: View {
         .fixedSize()
     }
 
+    /// The cite cursor: a thin accent caret drawn in front of the focused bubble to show
+    /// where a ⌃S signal will land (positioned with ◀/▶ on an empty query).
+    private var citeCursor: some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Color.accentColor)
+            .frame(width: 2, height: 28)
+            .accessibilityHidden(true)
+    }
+
     /// A committed cite, shown as a neutral bubble in the pill ahead of the query
-    /// (distinct from the accent signal chip). Click to remove it from the string cite.
-    private func citeBubble(_ cite: PendingCite) -> some View {
+    /// (distinct from the accent signal chip). Click to remove it from the string cite;
+    /// when the cite cursor is on it, an accent ring shows ⌃S will target it.
+    private func citeBubble(_ cite: PendingCite, selected: Bool) -> some View {
         Button {
             model.removeCite(cite.id)
             searchFocused = true
@@ -162,9 +223,10 @@ struct SearchView: View {
             .padding(.leading, 12).padding(.trailing, 9)
             .padding(.vertical, 5)
             .background(Capsule().fill(.quaternary))
+            .overlay(selected ? Capsule().strokeBorder(Color.accentColor, lineWidth: 1.5) : nil)
         }
         .buttonStyle(.plain)
-        .help("Click to remove from the citation")
+        .help(selected ? "▼ pincite/parenthetical · ◀ for signal" : "Click to remove from the citation")
         .frame(maxWidth: 170)
         .fixedSize()
     }
@@ -347,6 +409,8 @@ private struct CiteOptionsPopover: View {
                     field = (which == .pincite) ? .parenthetical : .pincite
                     return .handled
                 }
+                // ▲ (and Esc) close the popover without committing.
+                .onKeyPress(.upArrow) { onClose(); return .handled }
                 .onKeyPress(.escape) { onClose(); return .handled }
         }
     }

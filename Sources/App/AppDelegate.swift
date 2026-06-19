@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // no Dock icon (also set LSUIElement)
+        AppSettings.shared.appearance.apply() // honor the saved light/dark/auto choice
 
         // Nudge the Accessibility permission early so paste-back works on first use.
         Permissions.ensureTrusted(prompt: true)
@@ -97,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       model.query.isEmpty,                  // not mid-edit
                       !model.showingCiteOptions, !model.showingSignalPicker  // not in a popover field
                 else { return false }
+                // With the cite cursor parked on a bubble, ⌫ removes that one.
+                if let i = model.focusedCiteIndex, model.pendingCites.indices.contains(i) {
+                    model.removeCite(model.pendingCites[i].id); return true
+                }
                 if model.signal != nil { model.signal = nil; return true }
                 if let last = model.pendingCites.last { model.removeCite(last.id); return true }
                 return false
@@ -128,6 +133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model?.signal = nil
         model?.statusMessage = nil
         model?.pendingCites = []
+        model?.citeFocus = .none
+        model?.editingCiteIndex = nil
         model?.showingCiteOptions = false
         model?.showCount += 1 // re-focus the search field (see SearchView)
         NSApp.activate(ignoringOtherApps: true)

@@ -26,6 +26,13 @@ final class PreferencesModel: ObservableObject {
         didSet { AppSettings.shared.style = lawReviewStyle ? .lawReview : .courtDocument }
     }
 
+    @Published var appearance: AppAppearance {
+        didSet {
+            AppSettings.shared.appearance = appearance
+            appearance.apply()   // take effect immediately, no relaunch
+        }
+    }
+
     @Published var apiKey: String {
         didSet {
             let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -37,6 +44,19 @@ final class PreferencesModel: ObservableObject {
         launchAtLogin = LaunchAtLogin.isEnabled
         lawReviewStyle = AppSettings.shared.style == .lawReview
         apiKey = AppSettings.shared.apiKey ?? ""
+        appearance = AppSettings.shared.appearance
+    }
+}
+
+extension AppAppearance {
+    /// Apply this choice app-wide. `auto` clears the override so windows follow the
+    /// system; light/dark force the corresponding aqua appearance on every window.
+    @MainActor func apply() {
+        switch self {
+        case .auto:  NSApp.appearance = nil
+        case .light: NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark:  NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
     }
 }
 
@@ -50,6 +70,12 @@ struct PreferencesView: View {
         Form {
             Section("General") {
                 Toggle("Launch at login", isOn: $model.launchAtLogin)
+                Picker("Appearance", selection: $model.appearance) {
+                    Text("Auto").tag(AppAppearance.auto)
+                    Text("Light").tag(AppAppearance.light)
+                    Text("Dark").tag(AppAppearance.dark)
+                }
+                .pickerStyle(.segmented)
                 #if canImport(KeyboardShortcuts)
                 KeyboardShortcuts.Recorder("Summon hotkey:", name: .summon)
                 #endif

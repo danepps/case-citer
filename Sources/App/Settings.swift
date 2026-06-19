@@ -13,6 +13,11 @@ extension KeyboardShortcuts.Name {
 }
 #endif
 
+/// The three appearance modes offered in Settings. `auto` follows the system.
+enum AppAppearance: String, CaseIterable {
+    case auto, light, dark
+}
+
 /// User-facing configuration, persisted in `UserDefaults`.
 final class AppSettings {
     static let shared = AppSettings()
@@ -22,6 +27,13 @@ final class AppSettings {
         static let style = "citationStyle"          // "lawReview" | "courtDocument"
         static let apiKey = "courtListenerAPIKey"
         static let signals = "signals"              // [String]
+        static let appearance = "appearance"        // "auto" | "light" | "dark"
+    }
+
+    /// Window appearance. Default **auto** (follow the system setting).
+    var appearance: AppAppearance {
+        get { AppAppearance(rawValue: defaults.string(forKey: Key.appearance) ?? "") ?? .auto }
+        set { defaults.set(newValue.rawValue, forKey: Key.appearance) }
     }
 
     /// Citation style. Default **law-review** (full case name roman).
