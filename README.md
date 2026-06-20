@@ -75,12 +75,16 @@ The app also needs:
 1. The **Accessibility** permission (System Settings ▸ Privacy & Security ▸
    Accessibility) — required to synthesize ⌘V for paste-back. The app prompts on first
    launch via `AXIsProcessTrustedWithOptions`.
-2. A free **CourtListener API token** (Settings) for higher rate limits; anonymous
-   search works but is throttled.
+2. *(optional)* A free **CourtListener API token** for higher rate limits. The app
+   uses the **anonymous API by default** (no account needed; just throttled harder).
+   To opt in, open Settings, turn on **“Use a personal API token,”** and paste yours.
+   The token is stored only in this Mac's local `UserDefaults` — it is **never part of
+   the repo**, so cloning or handing over the source carries no credential with it.
 
 Open **Settings** from the menu-bar icon or the gear button in the search pill
 (⌘,). It holds: launch-at-login, the summon hotkey recorder, the citation-style
-choice, and the API token. **Launch at login** uses `SMAppService.mainApp`, which
+choice, and the optional API-token opt-in. **Launch at login** uses
+`SMAppService.mainApp`, which
 requires a real `.app` bundle with a bundle identifier — under a bare `swift run`
 binary the toggle has no bundle to register and reverts.
 

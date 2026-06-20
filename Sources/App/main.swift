@@ -19,7 +19,7 @@ if let qi = CommandLine.arguments.firstIndex(of: "--query"), qi + 1 < CommandLin
     if CommandLine.arguments.contains("--web") {
         let sem = DispatchSemaphore(value: 0)
         Task {
-            let client = SearchClient(apiKey: AppSettings.shared.apiKey)
+            let client = SearchClient(apiKey: AppSettings.shared.effectiveAPIKey)
             let web = ((try? await client.searchOpinions(query)) ?? []).filter(\.isCiteable)
             dump("local index (\(index.isEmpty ? "EMPTY" : "loaded"))", local)
             dump("web", web)
