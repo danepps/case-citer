@@ -1,5 +1,4 @@
 import Foundation
-import CourtListener
 
 /// In-memory search over the bundled top-by-citation SCOTUS index
 /// (`Resources/scotus-index.json`, built by `Tools/build-scotus-index.py`).
@@ -12,33 +11,32 @@ import CourtListener
 ///
 /// Loading is lazy and one-shot (the index is a few thousand small records), so the
 /// cost is paid on the first query, not at launch.
-struct LocalCaseIndex {
+///
+/// This lives in the platform-neutral `CourtListener` library (not the macOS app
+/// target) so any front-end — the macOS agent today, a Windows port tomorrow — gets
+/// the offline index for free. See `docs/porting-to-windows.md`.
+public struct LocalCaseIndex {
     private let records: [SearchResult]
     /// Lowercased case name alongside its record, computed once, so matching a query
     /// is a cheap substring scan rather than re-lowercasing on every keystroke.
     private let haystack: [(name: String, record: SearchResult)]
 
-    /// The shared index loaded from the app bundle. Empty if the resource is missing
-    /// or unreadable — the caller then simply gets no local hits and uses the network.
-    static let shared = LocalCaseIndex(bundleResource: "scotus-index")
+    /// The shared index loaded from the library's resource bundle. Empty if the
+    /// resource is missing or unreadable — the caller then simply gets no local hits
+    /// and uses the network.
+    public static let shared = LocalCaseIndex(bundleResource: "scotus-index")
 
-    init(records: [SearchResult]) {
+    public init(records: [SearchResult]) {
         self.records = records
         self.haystack = records.map { ($0.caseName?.lowercased() ?? "", $0) }
     }
 
-    init(bundleResource name: String) {
-        // The index ships as a resource in two build flavors: SwiftPM (`swift run`,
-        // tests) puts it in the generated module bundle (`Bundle.module`); the native
-        // Xcode app target copies it into the app's own Resources (`Bundle.main`).
-        // SWIFT_PACKAGE is defined only by SwiftPM, so this picks the right one — and
-        // never references `Bundle.module` (an SPM-only symbol) in the Xcode build.
-        #if SWIFT_PACKAGE
-        let bundle = Bundle.module
-        #else
-        let bundle = Bundle.main
-        #endif
-        guard let url = bundle.url(forResource: name, withExtension: "json"),
+    public init(bundleResource name: String) {
+        // The index ships as a resource of this package target, so it resolves through
+        // `Bundle.module` in both build flavors: a plain `swift build`/`swift test`,
+        // and the native Xcode app target, which consumes CourtListener as a SwiftPM
+        // package product and embeds its generated resource bundle automatically.
+        guard let url = Bundle.module.url(forResource: name, withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode([SearchResult].self, from: data) else {
             self.init(records: [])
@@ -47,7 +45,7 @@ struct LocalCaseIndex {
         self.init(records: decoded)
     }
 
-    var isEmpty: Bool { records.isEmpty }
+    public var isEmpty: Bool { records.isEmpty }
 
     /// Citeable local matches for `query`, ranked most-cited-first (the file's order is
     /// preserved by the stable scan). A match requires every whitespace-separated query
@@ -56,7 +54,7 @@ struct LocalCaseIndex {
     ///
     /// Returns at most `limit` results; an empty array means "not covered locally —
     /// go to the network."
-    func search(_ query: String, limit: Int = 25) -> [SearchResult] {
+    public func search(_ query: String, limit: Int = 25) -> [SearchResult] {
         let tokens = query.lowercased().split(whereSeparator: { $0 == " " }).map(String.init)
         guard !tokens.isEmpty else { return [] }
         var hits: [SearchResult] = []

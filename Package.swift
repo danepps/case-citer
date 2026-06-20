@@ -24,8 +24,17 @@ let package = Package(
         // builds and tests on any platform with a Swift toolchain.
         .target(name: "BluebookFormat"),
         // CourtListener REST client + Codable wire models. Maps CL JSON onto the
-        // formatter's CaseRecord input. Foundation only.
-        .target(name: "CourtListener", dependencies: ["BluebookFormat"]),
+        // formatter's CaseRecord input. Foundation only — and platform-neutral, so it
+        // also hosts the offline SCOTUS index (LocalCaseIndex) and its bundled data.
+        .target(
+            name: "CourtListener",
+            dependencies: ["BluebookFormat"],
+            // Prebuilt top-by-citation SCOTUS index (see Tools/build-scotus-index.py),
+            // searched locally so landmark cases resolve instantly and offline. Lives
+            // here (not the macOS App target) so any front-end can reuse it; resolved
+            // via Bundle.module.
+            resources: [.copy("Resources/scotus-index.json")]
+        ),
         // The agent app: menu-bar/LSUIElement, floating panel, paste-back. macOS only.
         .executableTarget(
             name: "App",
@@ -33,10 +42,7 @@ let package = Package(
                 "BluebookFormat",
                 "CourtListener",
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
-            ],
-            // Prebuilt top-by-citation SCOTUS index (see Tools/build-scotus-index.py),
-            // searched locally so landmark cases resolve instantly and offline.
-            resources: [.copy("Resources/scotus-index.json")]
+            ]
         ),
         .testTarget(name: "BluebookFormatTests", dependencies: ["BluebookFormat"]),
         .testTarget(name: "CourtListenerTests", dependencies: ["CourtListener"]),

@@ -33,6 +33,11 @@ final class PreferencesModel: ObservableObject {
         }
     }
 
+    /// Opt-in to a personal CourtListener token. Off by default → anonymous API.
+    @Published var useCustomAPIKey: Bool {
+        didSet { AppSettings.shared.useCustomAPIKey = useCustomAPIKey }
+    }
+
     @Published var apiKey: String {
         didSet {
             let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,6 +48,7 @@ final class PreferencesModel: ObservableObject {
     init() {
         launchAtLogin = LaunchAtLogin.isEnabled
         lawReviewStyle = AppSettings.shared.style == .lawReview
+        useCustomAPIKey = AppSettings.shared.useCustomAPIKey
         apiKey = AppSettings.shared.apiKey ?? ""
         appearance = AppSettings.shared.appearance
     }
@@ -93,9 +99,14 @@ struct PreferencesView: View {
             }
 
             Section("CourtListener") {
-                TextField("API token", text: $model.apiKey, prompt: Text("optional — raises rate limits"))
-                    .textFieldStyle(.roundedBorder)
-                Text("Anonymous search works but is throttled. A free token lifts the limit.")
+                Toggle("Use a personal API token", isOn: $model.useCustomAPIKey)
+                if model.useCustomAPIKey {
+                    TextField("API token", text: $model.apiKey, prompt: Text("paste your CourtListener token"))
+                        .textFieldStyle(.roundedBorder)
+                }
+                Text(model.useCustomAPIKey
+                     ? "Your token raises the rate limit. It's stored locally on this Mac only."
+                     : "Searching anonymously (throttled). Turn this on to use your own free CourtListener token.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

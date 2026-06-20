@@ -26,6 +26,7 @@ final class AppSettings {
     private enum Key {
         static let style = "citationStyle"          // "lawReview" | "courtDocument"
         static let apiKey = "courtListenerAPIKey"
+        static let useCustomAPIKey = "useCustomAPIKey"  // Bool; default false (anonymous)
         static let signals = "signals"              // [String]
         static let appearance = "appearance"        // "auto" | "light" | "dark"
     }
@@ -42,9 +43,29 @@ final class AppSettings {
         set { defaults.set(newValue == .courtDocument ? "courtDocument" : "lawReview", forKey: Key.style) }
     }
 
+    /// Whether to send a personal CourtListener token. **Default false**: the app
+    /// uses the anonymous (throttled) API out of the box, so nothing personal is
+    /// required to run it — and a cloned/handed-over repo carries no credential. Turn
+    /// this on in Settings to opt in to your own token (see `effectiveAPIKey`).
+    var useCustomAPIKey: Bool {
+        get { defaults.bool(forKey: Key.useCustomAPIKey) }
+        set { defaults.set(newValue, forKey: Key.useCustomAPIKey) }
+    }
+
+    /// The raw stored token, as edited in Settings. This is *not* what the network
+    /// client should read — use `effectiveAPIKey`, which honors the opt-in toggle.
     var apiKey: String? {
         get { defaults.string(forKey: Key.apiKey) }
         set { defaults.set(newValue, forKey: Key.apiKey) }
+    }
+
+    /// The token actually handed to `SearchClient`: the stored token only when the
+    /// user has opted in *and* it's non-empty; otherwise `nil` for an anonymous
+    /// request. Centralizing the rule here keeps anonymous the safe default at every
+    /// call site.
+    var effectiveAPIKey: String? {
+        guard useCustomAPIKey, let key = apiKey, !key.isEmpty else { return nil }
+        return key
     }
 
     /// Signal vocabulary; falls back to the shared default list.

@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setUpPanel() {
-        let client = SearchClient(apiKey: AppSettings.shared.apiKey)
+        let client = SearchClient(apiKey: AppSettings.shared.effectiveAPIKey)
         let model = SearchViewModel(client: client)
         self.model = model
         let view = SearchView(

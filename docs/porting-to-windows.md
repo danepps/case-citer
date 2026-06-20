@@ -54,9 +54,9 @@ index loader — is the part that is already done and portable.
 - **`CourtListener`** — async REST client + Codable wire models. Foundation
   only, already `FoundationNetworking`-aware.
 - **`scotus-index.json`** and `LocalCaseIndex` logic — the offline index is
-  plain JSON; the loader is Foundation. (Note: the *loader* currently lives in
-  `Sources/App/LocalCaseIndex.swift`, the macOS target — see "Refactor first"
-  below.)
+  plain JSON; the loader is Foundation. It now lives **in the `CourtListener`
+  library target** (`Sources/CourtListener/LocalCaseIndex.swift`), resolved via
+  `Bundle.module`, so a Windows front-end gets the offline index for free.
 
 ## What must be rebuilt
 
@@ -126,10 +126,11 @@ is low-risk because it is already isolated and test-covered.
 
 ## Suggested first steps (regardless of option)
 
-1. **Refactor first, port second.** Move the platform-neutral
-   `LocalCaseIndex` loader and the `scotus-index.json` resource out of the
-   macOS `App` target into a shared library target so the offline index isn't
-   trapped behind AppKit. Confirm `swift test` still passes.
+1. **Refactor first, port second.** ✅ *Done:* the platform-neutral
+   `LocalCaseIndex` loader and the `scotus-index.json` resource now live in the
+   `CourtListener` library target rather than the macOS `App` target, so the
+   offline index isn't trapped behind AppKit. (Re-run `swift test` after cloning
+   to confirm on your toolchain.)
 2. **Stand up the core on Windows / in the target language.** Either build
    `BluebookFormat` + `CourtListener` with a Windows Swift toolchain (Option A)
    or port them to C# test-first (Options B/C). Green tests here de-risk the
@@ -141,8 +142,11 @@ is low-risk because it is already isolated and test-covered.
 4. **Rebuild the panel UX.** Re-author `SearchView`'s keyboard-only flow
    (`⌘⇧-Space` → type → `↑/↓` → `⌃S` signal → `⇥` pincite → `⏎` insert →
    `esc`). This is the largest single chunk of UI work; budget accordingly.
-5. **Wire settings:** hotkey recorder, citation-style toggle, CourtListener API
-   token storage, launch-at-login.
+5. **Wire settings:** hotkey recorder, citation-style toggle, launch-at-login,
+   and the CourtListener token. Note the token is **opt-in** — the app defaults
+   to the anonymous API (`AppSettings.effectiveAPIKey` returns `nil` unless the
+   user turns on "Use a personal API token"), so a fresh install needs no
+   credential and the repo never carries one. Preserve that default in the port.
 
 ## Reference: macOS files and their Windows responsibilities
 

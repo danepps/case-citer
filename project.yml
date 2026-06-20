@@ -23,9 +23,10 @@ targets:
   CaseCiter:
     type: application
     platform: macOS
-    # Compile the agent UI sources directly into the app target; the bundled SCOTUS
-    # index (Resources/scotus-index.json) rides along as a Copy Bundle Resource and is
-    # found via Bundle.main (see the SWIFT_PACKAGE shim in LocalCaseIndex).
+    # Compile the agent UI sources directly into the app target. The bundled SCOTUS
+    # index now lives in the CourtListener package target (LocalCaseIndex), so it rides
+    # in via that product's generated resource bundle and is found through Bundle.module
+    # — no Copy Bundle Resource here.
     sources:
       - path: Sources/App
       - path: Packaging/Assets.xcassets
