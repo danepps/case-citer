@@ -25,65 +25,28 @@ struct SearchView: View {
     private var hasResults: Bool { !model.results.isEmpty }
 
     var body: some View {
-        VStack(spacing: 8) {
-            searchBar
-            // Popovers live in the layout flow (not as floating overlays) so the panel
-            // grows to fit them — otherwise, with no results, the short panel clips them.
+        // The signal picker floats in this ZStack instead of sitting in the VStack flow,
+        // so it overlays the top of the results rather than pushing them down. It's still
+        // a sibling here, so it counts toward the measured height (heightReader below) and
+        // the panel grows to fit it — no clipping even when there are no results.
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 8) {
+                searchBar
+                // The cite-options form stays in the flow (it's a form you fill in, and
+                // briefly nudging the results is fine).
+                if model.showingCiteOptions { citeOptionsPopoverView }
+                if hasResults {
+                    resultsCard
+                } else if let msg = model.statusMessage {
+                    // No results yet: surface progress/errors here, since the footer (which
+                    // also shows statusMessage) only exists once the results card appears.
+                    // Without this, a slow request leaves the pill looking frozen.
+                    statusPill(msg)
+                }
+            }
             if model.showingSignalPicker {
-                SignalPicker(lowercaseFirst: model.signalPickerLowercaseFirst,
-                             onChoose: { chosen in
-                    // Attach to the cursor-focused committed cite if there is one,
-                    // otherwise to the in-progress cite (the usual case).
-                    if model.focusedCiteIndex != nil {
-                        model.applySignalToFocusedCite(chosen)
-                    } else {
-                        model.signal = chosen
-                    }
-                    model.showingSignalPicker = false
-                    searchFocused = true
-                }, onCancel: {
-                    model.showingSignalPicker = false
-                    searchFocused = true
-                })
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if model.showingCiteOptions {
-                CiteOptionsPopover(
-                    pincite: $model.pincite,
-                    parenthetical: $model.parenthetical,
-                    onCommit: {
-                        if let i = model.editingCiteIndex {
-                            // Editing a committed cite: write the options back and keep it
-                            // selected so ◀/▶ keep working.
-                            model.applyCiteOptions(toCiteAt: i)
-                            model.editingCiteIndex = nil
-                            model.showingCiteOptions = false
-                            model.citeFocus = .selected(i)
-                        } else if model.addCurrentCite() {
-                            // empty editor / new cite path resets focus on its own
-                        }
-                        searchFocused = true
-                    },
-                    onClose: {
-                        // ▲ / esc: close without changing the cite; re-select it if we were
-                        // editing a committed one.
-                        if let i = model.editingCiteIndex {
-                            model.editingCiteIndex = nil
-                            model.citeFocus = .selected(i)
-                        }
-                        model.showingCiteOptions = false
-                        searchFocused = true
-                    }
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if hasResults {
-                resultsCard
-            } else if let msg = model.statusMessage {
-                // No results yet: surface progress/errors here, since the footer (which
-                // also shows statusMessage) only exists once the results card appears.
-                // Without this, a slow request leaves the pill looking frozen.
-                statusPill(msg)
+                signalPickerView
+                    .padding(.top, 60 + 8) // just below the pill (pill height + VStack spacing)
             }
         }
         .padding(20) // breathing room so the drop shadow isn't clipped
@@ -91,26 +54,73 @@ struct SearchView: View {
         // Translucency on the whole pill + results so what's behind shows through.
         .opacity(0.8)
         .background(heightReader)
+        // Pin the content to the top of the window. The panel resizes to fit (see
+        // SearchPanel.setContentHeight) but that resize lags the content by one runloop
+        // tick; without a top anchor, NSHostingView vertically centers the natural-size
+        // content during that gap, so the pill visibly drifts up/down as results
+        // expand/collapse. Top-aligning keeps the search field fixed in place.
+        // Placed *after* heightReader so the measured height stays the natural content
+        // height, not the filled window height (which would feed back into the resize).
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { searchFocused = true }
         .onChange(of: model.showCount) { _, _ in
             searchFocused = true
         }
     }
 
+    // MARK: popovers
+
+    /// The signal picker (⌃S). Keyboard nav (↑/↓/⏎/Esc) is handled by the search field,
+    /// which keeps focus; this renders the choices and supports a mouse click to choose.
+    private var signalPickerView: some View {
+        SignalPicker(choices: model.signalChoices,
+                     selection: model.signalSelection,
+                     onChoose: { index in
+            model.signalSelection = index
+            model.chooseHighlightedSignal()
+            searchFocused = true
+        })
+    }
+
+    /// The → cite-options form (pincite / parenthetical / short title).
+    private var citeOptionsPopoverView: some View {
+        CiteOptionsPopover(
+            pincite: $model.pincite,
+            parenthetical: $model.parenthetical,
+            shortForm: model.shortForm,
+            shortTitle: $model.shortTitle,
+            onCommit: {
+                if let i = model.editingCiteIndex {
+                    // Editing a committed cite: write the options back and keep it
+                    // selected so ◀/▶ keep working.
+                    model.applyCiteOptions(toCiteAt: i)
+                    model.editingCiteIndex = nil
+                    model.showingCiteOptions = false
+                    model.citeFocus = .selected(i)
+                } else if model.addCurrentCite() {
+                    // empty editor / new cite path resets focus on its own
+                }
+                searchFocused = true
+            },
+            onClose: {
+                // ▲ / esc: close without changing the cite; re-select it if we were
+                // editing a committed one.
+                if let i = model.editingCiteIndex {
+                    model.editingCiteIndex = nil
+                    model.citeFocus = .selected(i)
+                }
+                model.showingCiteOptions = false
+                searchFocused = true
+            }
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // MARK: search pill
 
     private var searchBar: some View {
         HStack(spacing: 14) {
-            Image(systemName: "books.vertical.fill")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            ForEach(Array(model.pendingCites.enumerated()), id: \.element.id) { index, cite in
-                if model.citeFocus == .ahead(index) { citeCursor }
-                citeBubble(cite, selected: model.citeFocus == .selected(index))
-            }
-            if let signal = model.signal, !signal.text.isEmpty {
-                signalChip(signal.text)
-            }
+            pillLeading
             TextField(model.pendingCites.isEmpty ? "Search a case…" : "Add another cite…", text: Binding(
                 get: { model.query },
                 set: { model.queryChanged($0) }
@@ -118,8 +128,12 @@ struct SearchView: View {
             .textFieldStyle(.plain)
             .font(.title2)
             .focused($searchFocused)
-            .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }
+            .onKeyPress(.upArrow) {
+                if model.showingSignalPicker { model.moveSignalSelection(by: -1); return .handled }
+                model.moveSelection(by: -1); return .handled
+            }
             .onKeyPress(.downArrow) {
+                if model.showingSignalPicker { model.moveSignalSelection(by: 1); return .handled }
                 // ▼ on a selected committed cite opens its pincite/parenthetical editor;
                 // otherwise it moves the result selection.
                 if case .selected(let i) = model.citeFocus {
@@ -129,7 +143,13 @@ struct SearchView: View {
                 model.moveSelection(by: 1)
                 return .handled
             }
-            .onKeyPress(keys: [.return]) { press in handleReturn(shift: press.modifiers.contains(.shift)) }
+            .onKeyPress(keys: [.return]) { press in
+                if model.showingSignalPicker {
+                    model.chooseHighlightedSignal()
+                    return .handled
+                }
+                return handleReturn(shift: press.modifiers.contains(.shift))
+            }
             .onKeyPress(.leftArrow) {
                 // With an empty query, ◀ walks a "cite cursor" back through the committed
                 // bubbles so ⌃S can attach a signal to a specific one. With text in the
@@ -151,16 +171,23 @@ struct SearchView: View {
             // local NSEvent monitor in AppDelegate — a focused TextField's field editor
             // swallows ⌫ before SwiftUI's onKeyPress(.delete) can see it.
             .onKeyPress(.escape) {
-                // Esc first parks the cite cursor (if active), then clears the query;
-                // a final (empty) Esc falls through to the panel's cancelOperation, which
-                // dismisses.
+                // Esc closes an open signal picker first, then parks the cite cursor,
+                // then clears the query; a final (empty) Esc falls through to the panel's
+                // cancelOperation, which dismisses.
+                if model.showingSignalPicker { model.closeSignalPicker(); return .handled }
                 if model.citeFocus != .none { model.citeFocus = .none; return .handled }
                 guard model.query.isEmpty else { model.queryChanged(""); return .handled }
                 return .ignored
             }
             .onKeyPress(keys: ["s"]) { press in
                 guard press.modifiers.contains(.control) else { return .ignored }
-                model.showingSignalPicker = true
+                // Toggle: ⌃S again closes the picker rather than re-opening it.
+                if model.showingSignalPicker { model.closeSignalPicker() } else { model.openSignalPicker() }
+                return .handled
+            }
+            .onKeyPress(keys: ["f"]) { press in
+                guard press.modifiers.contains(.control) else { return .ignored }
+                model.toggleShortForm()
                 return .handled
             }
             optionsMenu
@@ -171,6 +198,34 @@ struct SearchView: View {
         .background(Capsule().fill(.regularMaterial))
         .overlay(Capsule().strokeBorder(.quaternary, lineWidth: 1))
         .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
+    }
+
+    /// The pill's leading content (icon + committed-cite bubbles + signal / short-form
+    /// chips), split out so the search bar's HStack stays type-checkable.
+    @ViewBuilder private var pillLeading: some View {
+        // Design option C: in short-form mode the books icon tints accent and gains a
+        // small "S" badge — a fixed-position cue that persists even while typing.
+        Image(systemName: "books.vertical.fill")
+            .font(.title2)
+            .foregroundStyle(model.shortForm ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+            .overlay(alignment: .topTrailing) {
+                if model.shortForm {
+                    Text("S")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 13, height: 13)
+                        .background(Circle().fill(Color.accentColor))
+                        .overlay(Circle().strokeBorder(.regularMaterial, lineWidth: 1.5))
+                        .offset(x: 6, y: -6)
+                }
+            }
+        ForEach(Array(model.pendingCites.enumerated()), id: \.element.id) { index, cite in
+            if model.citeFocus == .ahead(index) { citeCursor }
+            citeBubble(cite, selected: model.citeFocus == .selected(index))
+        }
+        if let signal = model.signal, !signal.text.isEmpty {
+            signalChip(signal.text)
+        }
     }
 
     /// Inline confirmation that a Bluebook signal is active, sitting in the pill ahead
@@ -215,7 +270,7 @@ struct SearchView: View {
         } label: {
             HStack(spacing: 5) {
                 if let sig = cite.signalText { Text(sig).italic() }
-                Text(cite.label).lineLimit(1).truncationMode(.tail)
+                Text(cite.label).italic(cite.form == .short).lineLimit(1).truncationMode(.tail)
                 Image(systemName: "xmark.circle.fill").font(.caption)
             }
             .font(.title3)
@@ -295,7 +350,7 @@ struct SearchView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(model.results.enumerated()), id: \.offset) { index, result in
-                        ResultRow(result: result, selected: index == model.selection)
+                        ResultRow(result: result, selected: index == model.selection, shortForm: model.shortForm)
                             .padding(.horizontal, 16).padding(.vertical, 8)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(index == model.selection
@@ -329,8 +384,8 @@ struct SearchView: View {
     /// Keyboard cheat-sheet; wording shifts once cites are accumulating.
     private var footerHint: String {
         model.pendingCites.isEmpty
-            ? "→ pincite · ⌃S signal · ⏎ add · ⇧⏎ insert"
-            : "→ pincite · ⏎ add · ⇧⏎ / ⏎ again to insert"
+            ? "→ pincite · ⌃S signal · ⌃F short · ⏎ add · ⇧⏎ insert"
+            : "→ pincite · ⌃F short · ⏎ add · ⇧⏎ / ⏎ again to insert"
     }
 
     // MARK: helpers
@@ -376,16 +431,24 @@ struct SearchView: View {
 private struct CiteOptionsPopover: View {
     @Binding var pincite: String
     @Binding var parenthetical: String
+    /// When the cite is in short form, expose the editable short-title override at the
+    /// bottom (it's used rarely — the derived guess is usually right), so Pincite keeps
+    /// the default focus.
+    var shortForm: Bool
+    @Binding var shortTitle: String
     var onCommit: () -> Void
     var onClose: () -> Void
 
     @FocusState private var field: Field?
-    private enum Field { case pincite, parenthetical }
+    private enum Field { case shortTitle, pincite, parenthetical }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             labeledField("Pincite", placeholder: "page, e.g. 483", text: $pincite, field: .pincite)
             labeledField("Parenthetical", placeholder: "e.g. en banc", text: $parenthetical, field: .parenthetical)
+            if shortForm {
+                labeledField("Short title", placeholder: "e.g. Obergefell", text: $shortTitle, field: .shortTitle)
+            }
             Text("⏎ add cite · ⇥ next field · esc")
                 .font(.caption).foregroundStyle(.tertiary)
         }
@@ -398,6 +461,11 @@ private struct CiteOptionsPopover: View {
         .onAppear { field = .pincite }
     }
 
+    /// ⇥ cycles through the visible fields in order (short title last, only when shown).
+    private var tabOrder: [Field] {
+        shortForm ? [.pincite, .parenthetical, .shortTitle] : [.pincite, .parenthetical]
+    }
+
     private func labeledField(_ label: String, placeholder: String, text: Binding<String>, field which: Field) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(.caption).foregroundStyle(.secondary)
@@ -406,7 +474,10 @@ private struct CiteOptionsPopover: View {
                 .focused($field, equals: which)
                 .onKeyPress(.return) { onCommit(); return .handled }
                 .onKeyPress(.tab) {
-                    field = (which == .pincite) ? .parenthetical : .pincite
+                    let order = tabOrder
+                    if let i = order.firstIndex(of: which) {
+                        field = order[(i + 1) % order.count]
+                    }
                     return .handled
                 }
                 // ▲ (and Esc) close the popover without committing.
@@ -419,6 +490,9 @@ private struct CiteOptionsPopover: View {
 private struct ResultRow: View {
     let result: SearchResult
     let selected: Bool
+    /// When short-form mode is on, the row keeps the full case name (for identification)
+    /// and adds a preview of the short form that will actually be inserted.
+    var shortForm: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -430,6 +504,25 @@ private struct ResultRow: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            if let preview = shortPreview {
+                (Text("short form  ").foregroundStyle(.tertiary) + preview)
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    /// The short-form citation rendered as styled `Text` (italic title), or nil when off
+    /// or the record can't be formatted. No pincite here — it's chosen per cite later —
+    /// so the preview stops at the reporter, mirroring a no-pincite short cite.
+    private var shortPreview: Text? {
+        guard shortForm,
+              let rich = try? CaseCitation.format(
+                result.toCaseRecord(),
+                options: .init(style: AppSettings.shared.style, form: .short))
+        else { return nil }
+        return rich.runs.reduce(Text("")) { acc, run in
+            acc + (run.italic ? Text(run.text).italic() : Text(run.text))
         }
     }
 }

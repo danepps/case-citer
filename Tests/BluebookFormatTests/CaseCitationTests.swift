@@ -205,6 +205,97 @@ final class CaseCitationTests: XCTestCase {
         }
     }
 
+    // MARK: short-title derivation (Rule 10.9 / B10.2)
+
+    func testShortTitleFirstParty() {
+        XCTAssertEqual(CaseName.shortTitle("Obergefell v. Hodges"), "Obergefell")
+    }
+
+    func testShortTitleSkipsUnitedStates() {
+        XCTAssertEqual(CaseName.shortTitle("United States v. Nixon"), "Nixon")
+    }
+
+    func testShortTitleSkipsGenericGovParty() {
+        // "City of …" / "People" / "State of …" are generic — use the other party.
+        XCTAssertEqual(CaseName.shortTitle("City of Boerne v. Flores"), "Flores")
+        XCTAssertEqual(CaseName.shortTitle("People v. Anderson"), "Anderson")
+    }
+
+    func testShortTitleKeepsNamedState() {
+        // A named state is distinctive and stays as the short title.
+        XCTAssertEqual(CaseName.shortTitle("Arizona v. United States"), "Arizona")
+    }
+
+    func testShortTitleOrgKeepsAbbreviatedName() {
+        // Org party (chosen because the other is "United States") keeps its abbreviated
+        // name rather than collapsing to one word; "Company" → "Co." (T6).
+        XCTAssertEqual(CaseName.shortTitle("United States v. Standard Oil Company"), "Standard Oil Co.")
+    }
+
+    func testShortTitlePersonalSurname() {
+        XCTAssertEqual(CaseName.shortTitle("Mary Beth Tinker v. Des Moines"), "Tinker")
+    }
+
+    func testShortTitleInReSubject() {
+        XCTAssertEqual(CaseName.shortTitle("In re Gault"), "Gault")
+    }
+
+    // MARK: short-form citation
+
+    func testShortFormPlain() throws {
+        let opts = CaseCitation.Options(style: .lawReview, pincite: "681", form: .short)
+        let rt = try CaseCitation.format(obergefell(), options: opts)
+        XCTAssertEqual(rt.plainText, "Obergefell, 576 U.S. at 681.")
+    }
+
+    func testShortFormTitleItalicInLawReview() throws {
+        // Short titles are italic even in law-review style (where full names are roman).
+        let opts = CaseCitation.Options(style: .lawReview, pincite: "681", form: .short)
+        let rt = try CaseCitation.format(obergefell(), options: opts)
+        XCTAssertTrue(rt.rtfBody.contains("{\\i{}Obergefell}"), "got \(rt.rtfBody)")
+    }
+
+    func testShortFormNoPinciteDropsAt() throws {
+        let opts = CaseCitation.Options(form: .short)
+        let rt = try CaseCitation.format(obergefell(), options: opts)
+        XCTAssertEqual(rt.plainText, "Obergefell, 576 U.S.")
+    }
+
+    func testShortFormOverrideTitle() throws {
+        let opts = CaseCitation.Options(pincite: "851", form: .short, shortTitle: "Casey")
+        let rec = CaseRecord(
+            name: "Planned Parenthood of Southeastern Pa. v. Casey",
+            citations: [ReporterCitation(volume: "505", reporter: "U.S.", page: "833", kind: .official)],
+            courtID: "scotus", year: 1992)
+        let rt = try CaseCitation.format(rec, options: opts)
+        XCTAssertEqual(rt.plainText, "Casey, 505 U.S. at 851.")
+    }
+
+    func testShortFormSignalPrefix() throws {
+        let opts = CaseCitation.Options(signal: Signal("see").capitalized, pincite: "681", form: .short)
+        let rt = try CaseCitation.format(obergefell(), options: opts)
+        XCTAssertEqual(rt.plainText, "See Obergefell, 576 U.S. at 681.")
+        XCTAssertTrue(rt.rtfBody.hasPrefix("{\\i{}See} "), "got \(rt.rtfBody)")
+    }
+
+    func testShortFormNeedsNoYear() throws {
+        // Unlike the full cite, short form doesn't require a year.
+        let rec = CaseRecord(
+            name: "Doe v. Roe",
+            citations: [ReporterCitation(volume: "1", reporter: "U.S.", page: "1", kind: .official)],
+            courtID: "scotus", year: nil)
+        let rt = try CaseCitation.format(rec, options: .init(pincite: "5", form: .short))
+        XCTAssertEqual(rt.plainText, "Doe, 1 U.S. at 5.")
+    }
+
+    func testShortFormInStringCitation() throws {
+        let a = try CaseCitation.format(obergefell())
+        let b = try CaseCitation.format(obergefell(), options: .init(pincite: "681", form: .short))
+        let joined = CaseCitation.stringCitation([a, b])
+        XCTAssertEqual(joined.plainText,
+            "Obergefell v. Hodges, 576 U.S. 644 (2015); Obergefell, 576 U.S. at 681.")
+    }
+
     // MARK: RTF escaping of non-ASCII (curly apostrophe -> \uN{})
 
     func testRTFEscapesCurlyApostrophe() throws {

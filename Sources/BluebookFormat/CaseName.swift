@@ -107,6 +107,66 @@ public enum CaseName {
         return italicizeProceduralPhrases(in: abbreviated)
     }
 
+    /// Derive a Bluebook **short-form** case title (Rule 10.9 / B10.2) from a full
+    /// case name: normally one party's name, dropping a generic governmental party
+    /// (`United States`, `State`, `People`, `City of …`) in favor of the opposing
+    /// party, and reducing a personal-name party to its surname. Always returns the
+    /// *plain* string (the caller italicizes it) and is deliberately heuristic — the
+    /// UI offers an editable override for the captions it guesses wrong.
+    public static func shortTitle(_ rawName: String) -> String {
+        let normalized = normalizeV(rawName)
+
+        // "In re X" / "Ex parte X": the subject after the phrase is the short title.
+        for phrase in leadingProceduralPhrases where normalized.hasPrefix(phrase) {
+            return shortenParty(abbreviate(String(normalized.dropFirst(phrase.count))))
+        }
+
+        let sides = normalized.components(separatedBy: " v. ")
+        let primary = (sides.first ?? normalized).trimmingCharacters(in: .whitespaces)
+        // Skip a generic governmental/geographic first party for the opposing one.
+        let chosen: String
+        if sides.count >= 2, isGenericParty(primary) {
+            chosen = sides[1].trimmingCharacters(in: .whitespaces)
+        } else {
+            chosen = primary
+        }
+        return shortenParty(abbreviate(chosen))
+    }
+
+    /// A party that's a generic governmental/geographic litigant rather than a
+    /// distinctive name — the one Bluebook drops from the short form. A *named*
+    /// state (`Arizona`, `California`) is **not** generic: `Arizona v. United States`
+    /// shortens to *Arizona*, while `United States v. Nixon` shortens to *Nixon*.
+    private static func isGenericParty(_ party: String) -> Bool {
+        let lower = party.lowercased().trimmingCharacters(in: .whitespaces)
+        if lower == "united states" || lower == "united states of america" { return true }
+        let leads = ["state", "commonwealth", "people", "city of", "county of", "town of", "village of"]
+        return leads.contains { lower == $0 || lower.hasPrefix($0 + " ") }
+    }
+
+    /// Reduce a (already-abbreviated) party to its short-form token(s): a personal
+    /// name collapses to its surname (last word); an organization keeps its
+    /// abbreviated name (`Standard Oil Co.`), since one word would lose the cite.
+    private static func shortenParty(_ party: String) -> String {
+        let tokens = party.split(separator: " ").map(String.init)
+        guard tokens.count > 1 else { return party }
+        if looksLikeOrganization(party) { return party }
+        return tokens.last ?? party
+    }
+
+    /// Heuristic: does this party read as an organization (keep the full name) rather
+    /// than a personal name (collapse to a surname)?
+    private static func looksLikeOrganization(_ party: String) -> Bool {
+        let lower = party.lowercased()
+        if lower.contains(" of ") || lower.contains(" & ") || lower.contains(" and ") { return true }
+        let markers = ["co.", "corp.", "inc.", "ltd.", "ass\u{2019}n", "ass\u{2019}ns",
+                       "r.r.", "ry.", "mfg.", "nat\u{2019}l", "int\u{2019}l", "ins.", "bros.",
+                       "board", "bureau", "commission", "dep\u{2019}t", "department",
+                       "univ.", "university", "bank", "school", "church", "trust",
+                       "fund", "company", "council", "union", "found"]
+        return markers.contains { lower.contains($0) }
+    }
+
     /// Normalize the versus separator to Bluebook `v.` (handles "vs.", "vs",
     /// stray casing) without touching party text.
     static func normalizeV(_ name: String) -> String {

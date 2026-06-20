@@ -10,6 +10,10 @@ import Foundation
 /// you can paste as RTF (italics preserved) or plain (degraded). No UI/network.
 public enum CaseCitation {
 
+    /// Full citation (`Obergefell v. Hodges, 576 U.S. 644, 681 (2015).`) vs. Bluebook
+    /// short form (`Obergefell, 576 U.S. at 681.`), Rule 10.9 / B10.2.
+    public enum CitationForm { case full, short }
+
     public struct Options {
         public var style: CitationStyle
         public var signal: Signal?
@@ -17,14 +21,24 @@ public enum CaseCitation {
         /// Explanatory parenthetical, rendered roman in parens after the date — e.g.
         /// "en banc" → `... (1954) (en banc).` Just the inner text, no parens.
         public var parenthetical: String?
+        /// Full vs. short form. Short form italicizes the title in *both* styles and
+        /// drops the court/year parenthetical.
+        public var form: CitationForm
+        /// Short-form title override; nil/empty derives it from the record name via
+        /// `CaseName.shortTitle`. Ignored for `.full`.
+        public var shortTitle: String?
         public init(style: CitationStyle = .lawReview,
                     signal: Signal? = nil,
                     pincite: String? = nil,
-                    parenthetical: String? = nil) {
+                    parenthetical: String? = nil,
+                    form: CitationForm = .full,
+                    shortTitle: String? = nil) {
             self.style = style
             self.signal = signal
             self.pincite = pincite
             self.parenthetical = parenthetical
+            self.form = form
+            self.shortTitle = shortTitle
         }
     }
 
@@ -37,6 +51,13 @@ public enum CaseCitation {
     /// (no reporter, or no date) so the caller can grey the result out rather
     /// than paste something malformed.
     public static func format(_ record: CaseRecord, options: Options = Options()) throws -> RichText {
+        switch options.form {
+        case .full:  return try formatFull(record, options: options)
+        case .short: return try formatShort(record, options: options)
+        }
+    }
+
+    private static func formatFull(_ record: CaseRecord, options: Options) throws -> RichText {
         guard let citation = Reporter.primary(from: record.citations),
               let reporterText = Reporter.render(citation, pincite: options.pincite) else {
             throw FormatError.noReporter
@@ -65,6 +86,51 @@ public enum CaseCitation {
             out.append(" (\(paren))")
         }
         out.append(".")
+
+        return out
+    }
+
+    /// Bluebook short form: `[<italic signal> ]<italic short title>, <vol> <reporter>
+    /// at <pincite>.` The title is italic in *both* styles, there's no court/year
+    /// parenthetical, and the pincite (when present) follows `at`; with no pincite we
+    /// stop at the reporter. Needs a reporter but — unlike the full cite — no year.
+    private static func formatShort(_ record: CaseRecord, options: Options) throws -> RichText {
+        guard let citation = Reporter.primary(from: record.citations) else {
+            throw FormatError.noReporter
+        }
+        let vol = citation.volume.trimmingCharacters(in: .whitespaces)
+        let rep = citation.reporter.trimmingCharacters(in: .whitespaces)
+        let page = citation.page.trimmingCharacters(in: .whitespaces)
+        guard !vol.isEmpty, !rep.isEmpty, !page.isEmpty else { throw FormatError.noReporter }
+
+        var out = RichText()
+
+        // Signal (always italic), with a trailing space.
+        if let signal = options.signal, !signal.text.isEmpty {
+            out.append(signal.text, italic: true)
+            out.append(" ")
+        }
+
+        // Short title — always italic, regardless of style. Use the override when set,
+        // otherwise derive it from the full case name.
+        let override = options.shortTitle?.trimmingCharacters(in: .whitespaces)
+        let title = (override?.isEmpty == false) ? override! : CaseName.shortTitle(record.name)
+        out.append(.italic(title))
+
+        // ", <vol> <reporter>" then " at <pincite>" when a pincite is given.
+        if let p = options.pincite?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+            out.append(", \(vol) \(rep) at \(p)")
+        } else {
+            out.append(", \(vol) \(rep)")
+        }
+
+        // Optional explanatory parenthetical (roman), then the terminal period —
+        // unless the cite already ends in one (e.g. a no-pincite cite ending in the
+        // reporter abbreviation "U.S."), where the sentence period merges.
+        if let paren = options.parenthetical?.trimmingCharacters(in: .whitespaces), !paren.isEmpty {
+            out.append(" (\(paren))")
+        }
+        if !out.plainText.hasSuffix(".") { out.append(".") }
 
         return out
     }

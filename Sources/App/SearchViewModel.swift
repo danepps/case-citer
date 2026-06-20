@@ -15,9 +15,18 @@ final class SearchViewModel: ObservableObject {
     /// Explanatory parenthetical for the in-progress cite (e.g. "en banc"), entered in
     /// the → cite-options popover. Baked into the bubble when the cite is added.
     @Published var parenthetical: String = ""
+    /// Short-form toggle for the in-progress cite (⌃F). Full form is the default.
+    @Published var shortForm: Bool = false
+    /// Editable short-form title override for the in-progress cite; empty derives it
+    /// from the selected case name. Shown in the → popover when `shortForm` is on.
+    @Published var shortTitle: String = ""
     @Published var signal: Signal? = nil
     @Published var statusMessage: String? = nil
     @Published var showingSignalPicker = false
+    /// Highlighted row in the signal picker. Driven from the search field's key handlers
+    /// (↑/↓/⏎) rather than the picker stealing focus — focus transfer is unreliable on
+    /// the nonactivating panel, which left the picker impossible to navigate or dismiss.
+    @Published var signalSelection = 0
     /// The → cite-options popover (pincite + parenthetical for the current selection).
     @Published var showingCiteOptions = false
     /// Cites already committed to the string citation, shown as bubbles in the pill.
@@ -147,13 +156,30 @@ final class SearchViewModel: ObservableObject {
         var seen = Set<String>()
         let combined = (local + web).filter { seen.insert(identity($0)).inserted }
         return combined.enumerated()
-            .map { offset, r in (r, score(r, tokens: tokens, query: q), offset) }
+            .map { offset, r in (r, score(r, tokens: tokens, query: q), courtProminence(r), offset) }
             .sorted { a, b in
                 if a.1.tier != b.1.tier { return a.1.tier > b.1.tier }             // relevance tier
+                if a.2 != b.2 { return a.2 > b.2 }                                  // court prominence
                 if a.1.specificity != b.1.specificity { return a.1.specificity > b.1.specificity }
-                return a.2 < b.2                                                    // stable: cache before web
+                return a.3 < b.3                                                    // stable: cache before web
             }
             .map(\.0)
+    }
+
+    /// How prominent the deciding court is, used to break ties between results that
+    /// match the query equally well by name. Without it a bare surname query ("bivens")
+    /// makes *every* hit a prefix match, so the next tiebreak — specificity (matched
+    /// words ÷ total) — rewards the *shortest* caption and buries landmark cases with
+    /// long captions (e.g. *Bivens v. Six Unknown Named Agents …*, 403 U.S. 388) under
+    /// obscure state cases. Ranking SCOTUS, then the federal courts of appeals, above
+    /// everything else surfaces the case the user almost certainly means.
+    nonisolated private static func courtProminence(_ r: SearchResult) -> Int {
+        guard let id = r.courtId else { return 0 }
+        if id == "scotus" { return 3 }
+        // The T7 table holds exactly the federal courts of appeals (non-empty
+        // abbreviation); reuse it so state ids like "cal" aren't caught by a "ca" prefix.
+        if let abbr = Court.abbreviation(for: id), !abbr.isEmpty { return 2 }
+        return 1
     }
 
     /// Name-match relevance: a coarse tier (exact > prefix > all-tokens-as-words >
@@ -201,12 +227,42 @@ final class SearchViewModel: ObservableObject {
         guard let record = selectedRecord, let rich = formatSelected() else { return false }
         // Retain the signal and the formatting inputs so the cite can be re-formatted
         // later if its signal/pincite/parenthetical are edited (they're baked into `rich`).
-        pendingCites.append(PendingCite(label: record.name, signal: signal, rich: rich,
+        let form: CaseCitation.CitationForm = shortForm ? .short : .full
+        let override = shortTitle.isEmpty ? nil : shortTitle
+        pendingCites.append(PendingCite(label: Self.bubbleLabel(form: form, shortTitle: override, record: record),
+                                        signal: signal, rich: rich,
                                         record: record,
                                         pincite: pincite.isEmpty ? nil : pincite,
-                                        parenthetical: parenthetical.isEmpty ? nil : parenthetical))
+                                        parenthetical: parenthetical.isEmpty ? nil : parenthetical,
+                                        form: form,
+                                        shortTitle: override))
         resetCurrentCite()
         return true
+    }
+
+    /// The case name shown in a cite's bubble: the derived/overridden short title in
+    /// short form, otherwise the full case name.
+    private static func bubbleLabel(form: CaseCitation.CitationForm, shortTitle: String?, record: CaseRecord) -> String {
+        guard form == .short else { return record.name }
+        let t = shortTitle?.trimmingCharacters(in: .whitespaces)
+        return (t?.isEmpty == false) ? t! : CaseName.shortTitle(record.name)
+    }
+
+    /// ⌃F: toggle short form. On the cursor-focused committed cite if there is one
+    /// (re-formatting it), otherwise on the in-progress cite — prefilling the editable
+    /// short-title with the derived guess so the → popover can correct it.
+    func toggleShortForm() {
+        if let index = focusedCiteIndex, pendingCites.indices.contains(index) {
+            var cite = pendingCites[index]
+            cite.form = (cite.form == .short) ? .full : .short
+            cite.label = Self.bubbleLabel(form: cite.form, shortTitle: cite.shortTitle, record: cite.record)
+            if let rich = reformat(cite) { cite.rich = rich; pendingCites[index] = cite }
+            return
+        }
+        shortForm.toggle()
+        if shortForm, shortTitle.isEmpty, let record = selectedRecord {
+            shortTitle = CaseName.shortTitle(record.name)
+        }
     }
 
     // MARK: cite cursor (edit an already-committed cite)
@@ -216,6 +272,46 @@ final class SearchViewModel: ObservableObject {
     /// cite or the in-progress one being appended.
     var signalPickerLowercaseFirst: Bool {
         (focusedCiteIndex ?? pendingCites.count) > 0
+    }
+
+    /// The signals shown in the picker, in display order (see `signalPickerLowercaseFirst`).
+    /// Single source of truth for both the picker view and the field's key handlers.
+    var signalChoices: [Signal] {
+        if signalPickerLowercaseFirst {
+            let base = Signal.continuationOrder
+            return base + base.map(\.capitalized)
+        }
+        return Signal.firstCiteLeading + Signal.continuationOrder
+    }
+
+    /// Open the signal picker with a fresh selection.
+    func openSignalPicker() {
+        signalSelection = 0
+        showingSignalPicker = true
+    }
+
+    func closeSignalPicker() {
+        showingSignalPicker = false
+    }
+
+    func moveSignalSelection(by delta: Int) {
+        let count = signalChoices.count
+        guard count > 0 else { return }
+        signalSelection = min(max(0, signalSelection + delta), count - 1)
+    }
+
+    /// Apply the highlighted signal to the cursor-focused committed cite, or the
+    /// in-progress cite if none is focused, then close the picker.
+    func chooseHighlightedSignal() {
+        let choices = signalChoices
+        guard choices.indices.contains(signalSelection) else { closeSignalPicker(); return }
+        let chosen = choices[signalSelection]
+        if focusedCiteIndex != nil {
+            applySignalToFocusedCite(chosen)
+        } else {
+            signal = chosen
+        }
+        closeSignalPicker()
     }
 
     /// ◀ on an empty query: text field → select last bubble → in front of it → select the
@@ -245,6 +341,8 @@ final class SearchViewModel: ObservableObject {
         let cite = pendingCites[index]
         pincite = cite.pincite ?? ""
         parenthetical = cite.parenthetical ?? ""
+        shortForm = (cite.form == .short)
+        shortTitle = cite.shortTitle ?? (shortForm ? CaseName.shortTitle(cite.record.name) : "")
         editingCiteIndex = index
         showingCiteOptions = true
     }
@@ -255,6 +353,9 @@ final class SearchViewModel: ObservableObject {
         var cite = pendingCites[index]
         cite.pincite = pincite.isEmpty ? nil : pincite
         cite.parenthetical = parenthetical.isEmpty ? nil : parenthetical
+        cite.form = shortForm ? .short : .full
+        cite.shortTitle = shortTitle.isEmpty ? nil : shortTitle
+        cite.label = Self.bubbleLabel(form: cite.form, shortTitle: cite.shortTitle, record: cite.record)
         if let rich = reformat(cite) { cite.rich = rich; pendingCites[index] = cite }
     }
 
@@ -273,7 +374,9 @@ final class SearchViewModel: ObservableObject {
             style: AppSettings.shared.style,
             signal: cite.signal,
             pincite: cite.pincite,
-            parenthetical: cite.parenthetical
+            parenthetical: cite.parenthetical,
+            form: cite.form,
+            shortTitle: cite.shortTitle
         )
         return try? CaseCitation.format(cite.record, options: opts)
     }
@@ -305,6 +408,8 @@ final class SearchViewModel: ObservableObject {
         signal = nil
         pincite = ""
         parenthetical = ""
+        shortForm = false
+        shortTitle = ""
         statusMessage = nil
         showingCiteOptions = false
         editingCiteIndex = nil
@@ -321,7 +426,9 @@ final class SearchViewModel: ObservableObject {
             style: AppSettings.shared.style,
             signal: signal,
             pincite: pincite.isEmpty ? nil : pincite,
-            parenthetical: parenthetical.isEmpty ? nil : parenthetical
+            parenthetical: parenthetical.isEmpty ? nil : parenthetical,
+            form: shortForm ? .short : .full,
+            shortTitle: shortTitle.isEmpty ? nil : shortTitle
         )
         do {
             return try CaseCitation.format(record, options: opts)
@@ -346,17 +453,22 @@ enum CiteFocus: Equatable {
 
 struct PendingCite: Identifiable {
     let id = UUID()
-    let label: String
+    /// The case name shown in the bubble — the short title in short form, else the full
+    /// name. Mutable so toggling form / editing the short-title override updates it.
+    var label: String
     /// The signal applied to this cite (if any). Mutable so a signal can be attached
     /// after the fact via the cite cursor; drives the italic prefix shown in the bubble.
     var signal: Signal?
     var rich: RichText
     /// Formatting inputs retained so the cite can be re-formatted when its signal,
-    /// pincite, or parenthetical is edited (they're baked into `rich`, not editable
-    /// in place).
+    /// pincite, parenthetical, or form is edited (they're baked into `rich`, not
+    /// editable in place).
     let record: CaseRecord
     var pincite: String?
     var parenthetical: String?
+    /// Full vs. short form for this cite, and the short-title override (nil = derived).
+    var form: CaseCitation.CitationForm = .full
+    var shortTitle: String?
 
     /// The signal text shown italic in the bubble, or nil when there's no signal.
     var signalText: String? { (signal?.text).flatMap { $0.isEmpty ? nil : $0 } }
