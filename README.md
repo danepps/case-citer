@@ -5,15 +5,12 @@ app, get a floating Spotlight-style search box, type a case name, pick a result 
 **CourtListener**, optionally add an introductory signal and a pincite, and have a
 properly-formatted Bluebook **case** citation pasted into whatever you're typing in.
 
-> This project is self-contained and shares **no code** with the Zotero plugins it
-> currently sits beside in this repo — only Bluebook *domain knowledge* carries over.
-> It is intended to graduate into its own repository.
-
 ## Status
 
-Phase 1 (the substantive core) is implemented and tested: the pure `BluebookFormat`
-library and its unit tests. The `CourtListener` client and the `App` agent layer are
-scaffolded per the plan and build on macOS.
+Implemented and in daily use on macOS. The pure `BluebookFormat` library is fully
+unit-tested; the `CourtListener` client (live search + offline SCOTUS index) and the
+`App` agent layer (global hotkey, floating panel, paste-back) are complete. A Windows
+port is scoped but not started — see [`docs/porting-to-windows.md`](docs/porting-to-windows.md).
 
 ## Architecture
 
@@ -76,10 +73,19 @@ The app also needs:
    Accessibility) — required to synthesize ⌘V for paste-back. The app prompts on first
    launch via `AXIsProcessTrustedWithOptions`.
 2. *(optional)* A free **CourtListener API token** for higher rate limits. The app
-   uses the **anonymous API by default** (no account needed; just throttled harder).
-   To opt in, open Settings, turn on **“Use a personal API token,”** and paste yours.
-   The token is stored only in this Mac's local `UserDefaults` — it is **never part of
-   the repo**, so cloning or handing over the source carries no credential with it.
+   uses the **anonymous API by default** (no account needed; just throttled harder —
+   verified working as of June 2026). To opt in, open Settings, turn on **“Use a
+   personal API token,”** and paste yours. The token is stored only in this Mac's
+   local `UserDefaults` — it is **never part of the repo**, so cloning or handing over
+   the source carries no credential with it.
+
+   > **Note on rate limits:** CourtListener changed its API access model in May 2026
+   > (the old flat 5,000 req/hr default was lowered, and full access is now tied to a
+   > free account/membership). Anonymous search still works today, but the exact
+   > anonymous and free-token ceilings can change — check the
+   > [current limits](https://www.courtlistener.com/help/api/rest/v4/overview) before
+   > relying on heavy unauthenticated use, and handle `429`/`401` defensively. EDU
+   > accounts get a generous tier at no cost.
 
 Open **Settings** from the menu-bar icon or the gear button in the search pill
 (⌘,). It holds: launch-at-login, the summon hotkey recorder, the citation-style
@@ -94,7 +100,8 @@ Gatekeeper). Notarized-DMG distribution is a later decision.
 ## Local SCOTUS index (offline-first)
 
 The app ships a prebuilt index of the most-cited Supreme Court cases
-(`Sources/App/Resources/scotus-index.json`). A query shows matching cached cases
+(`Sources/CourtListener/Resources/scotus-index.json`, bundled with the `CourtListener`
+library target so a future non-macOS front end inherits it). A query shows matching cached cases
 **instantly and offline** (*Roe*, *Obergefell*, *Marbury*, …), then the live
 CourtListener search runs and is **merged in**: results are de-duplicated and
 relevance-ranked by name match, so a better web hit (or a lower-court case the
@@ -127,3 +134,8 @@ respects the 429 throttle, and checkpoints as it goes. Validate without the GUI:
 Cases only. Statutes, secondary sources, and id./supra short forms are out of scope.
 The T6/T10 case-name abbreviation tables are intentionally a **permissive subset** —
 they abbreviate common words and leave the rest verbatim, and are grown test-first.
+
+## License
+
+[GNU General Public License v3.0](LICENSE). Court data comes from
+[CourtListener](https://www.courtlistener.com/) (Free Law Project) under its API terms.

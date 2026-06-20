@@ -30,8 +30,8 @@ along those boundaries:
 | Target | ~Lines | Imports | Portable as-is? |
 |---|---|---|---|
 | `BluebookFormat` | ~723 | Foundation only | ✅ Yes |
-| `CourtListener` | ~315 | Foundation (+ `FoundationNetworking`) | ✅ Yes |
-| `App` | ~1,780 | AppKit, SwiftUI, Carbon (via KeyboardShortcuts), ServiceManagement, ApplicationServices | ❌ Rewrite |
+| `CourtListener` | ~382 | Foundation (+ `FoundationNetworking`) | ✅ Yes |
+| `App` | ~1,760 | AppKit, SwiftUI, Carbon (via KeyboardShortcuts), ServiceManagement, ApplicationServices | ❌ Rewrite |
 
 Two existing signals show the author already anticipated cross-platform builds:
 
@@ -147,6 +147,11 @@ is low-risk because it is already isolated and test-covered.
    to the anonymous API (`AppSettings.effectiveAPIKey` returns `nil` unless the
    user turns on "Use a personal API token"), so a fresh install needs no
    credential and the repo never carries one. Preserve that default in the port.
+   Anonymous search works (verified June 2026), but CourtListener changed its API
+   access model in May 2026 and lowered the old flat 5,000 req/hr default — handle
+   `429` (throttled) and `401` (auth required) defensively rather than assuming the
+   anonymous path is unlimited, and check the
+   [current limits](https://www.courtlistener.com/help/api/rest/v4/overview).
 
 ## Reference: macOS files and their Windows responsibilities
 
@@ -163,7 +168,7 @@ is low-risk because it is already isolated and test-covered.
 | `Sources/App/Paster.swift` | Clipboard write + ⌘V synth | Clipboard + `SendInput` |
 | `Sources/App/Permissions.swift` | Accessibility prompt | **Delete** — not needed on Windows |
 | `Sources/App/LaunchAtLogin.swift` | `SMAppService` | Registry `Run` key / Startup shortcut |
-| `Sources/App/LocalCaseIndex.swift` | Offline SCOTUS index loader | Move to shared lib (platform-neutral) |
+| `Sources/CourtListener/LocalCaseIndex.swift` | Offline SCOTUS index loader | Already in the shared `CourtListener` lib (platform-neutral) — reuse as-is |
 
 ## Open questions to resolve with the new owner
 
