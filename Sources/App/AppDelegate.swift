@@ -105,6 +105,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     else { model.toggleShortForm() }
                     return true
                 }
+                // ◀ walks the cite cursor back through the committed bubbles so a previous
+                // cite stays reachable even with a new search typed in the box. Only while
+                // a string citation is being built (bubbles exist) and with no real
+                // modifier held (⌥/⌘ word- and line-moves are left to the field editor);
+                // single-cite mode keeps ◀ as ordinary text-caret movement. Arrow keys
+                // always carry .numericPad/.function flags, so test the *real* modifiers
+                // explicitly rather than mods.isEmpty (which never holds for an arrow).
+                if keyCode == 123,                   // kVK_LeftArrow
+                   mods.intersection([.command, .control, .option, .shift]).isEmpty,
+                   !model.showingSignalPicker, !model.showingCiteOptions,
+                   !model.pendingCites.isEmpty {
+                    // Let the field editor move the caret through any typed text first; only
+                    // once the caret is already at the very start (and nothing is selected)
+                    // does ◀ step back to the previous committed bubble.
+                    if let editor = self.panel?.firstResponder as? NSTextView {
+                        let sel = editor.selectedRange()
+                        if sel.location > 0 || sel.length > 0 { return false }
+                    }
+                    model.moveCiteCursorLeft()
+                    return true
+                }
                 guard keyCode == 51,                  // kVK_Delete (Backspace)
                       model.query.isEmpty,            // not mid-edit
                       !model.showingCiteOptions, !model.showingSignalPicker  // not in a popover field

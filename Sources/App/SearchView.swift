@@ -152,14 +152,9 @@ struct SearchView: View {
                 }
                 return handleReturn(shift: press.modifiers.contains(.shift))
             }
-            .onKeyPress(.leftArrow) {
-                // With an empty query, ◀ walks a "cite cursor" back through the committed
-                // bubbles so ⌃S can attach a signal to a specific one. With text in the
-                // field, let ◀ move the text cursor as usual.
-                guard model.query.isEmpty, !model.pendingCites.isEmpty else { return .ignored }
-                model.moveCiteCursorLeft()
-                return .handled
-            }
+            // NOTE: ◀ (walk the cite cursor back through committed bubbles) is handled by
+            // the local NSEvent monitor in AppDelegate — it needs the field editor's caret
+            // position to fire only at the start of the text, which onKeyPress can't see.
             .onKeyPress(.rightArrow) {
                 // ▶ walks the cite cursor back toward (and into) the text field. Otherwise,
                 // once there are results, → opens the cite-options popover (pincite +
