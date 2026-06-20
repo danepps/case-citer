@@ -8,7 +8,7 @@ final class CaseCitationTests: XCTestCase {
     private func obergefell(pincite: String? = nil) -> CaseRecord {
         CaseRecord(
             name: "Obergefell v. Hodges",
-            citations: [ReporterCitation(volume: "576", reporter: "U.S.", page: "644", kind: .official)],
+            citations: [ReporterCitation(volume: "576", reporter: "U.S.", page: "644", kind: .federalOfficial)],
             courtID: "scotus",
             year: 2015
         )
@@ -106,7 +106,7 @@ final class CaseCitationTests: XCTestCase {
     func testCircuitParenthetical() throws {
         let rec = CaseRecord(
             name: "Doe v. Roe",
-            citations: [ReporterCitation(volume: "123", reporter: "F.3d", page: "456", kind: .regional)],
+            citations: [ReporterCitation(volume: "123", reporter: "F.3d", page: "456", kind: .federal)],
             courtID: "ca9",
             year: 2018
         )
@@ -119,7 +119,7 @@ final class CaseCitationTests: XCTestCase {
     func testT6Abbreviation() throws {
         let rec = CaseRecord(
             name: "Standard Oil Company v. United States",
-            citations: [ReporterCitation(volume: "221", reporter: "U.S.", page: "1", kind: .official)],
+            citations: [ReporterCitation(volume: "221", reporter: "U.S.", page: "1", kind: .federalOfficial)],
             courtID: "scotus",
             year: 1911
         )
@@ -172,8 +172,8 @@ final class CaseCitationTests: XCTestCase {
         let rec = CaseRecord(
             name: "Brown v. Board of Education",
             citations: [
-                ReporterCitation(volume: "74", reporter: "S. Ct.", page: "686", kind: .regional),
-                ReporterCitation(volume: "347", reporter: "U.S.", page: "483", kind: .official),
+                ReporterCitation(volume: "74", reporter: "S. Ct.", page: "686", kind: .federal),
+                ReporterCitation(volume: "347", reporter: "U.S.", page: "483", kind: .federalOfficial),
             ],
             courtID: "scotus",
             year: 1954
@@ -196,7 +196,7 @@ final class CaseCitationTests: XCTestCase {
     func testNoYearThrows() {
         let rec = CaseRecord(
             name: "Doe v. Roe",
-            citations: [ReporterCitation(volume: "1", reporter: "U.S.", page: "1", kind: .official)],
+            citations: [ReporterCitation(volume: "1", reporter: "U.S.", page: "1", kind: .federalOfficial)],
             courtID: "scotus",
             year: nil
         )
@@ -276,7 +276,7 @@ final class CaseCitationTests: XCTestCase {
         let opts = CaseCitation.Options(pincite: "851", form: .short, shortTitle: "Casey")
         let rec = CaseRecord(
             name: "Planned Parenthood of Southeastern Pa. v. Casey",
-            citations: [ReporterCitation(volume: "505", reporter: "U.S.", page: "833", kind: .official)],
+            citations: [ReporterCitation(volume: "505", reporter: "U.S.", page: "833", kind: .federalOfficial)],
             courtID: "scotus", year: 1992)
         let rt = try CaseCitation.format(rec, options: opts)
         XCTAssertEqual(rt.plainText, "Casey, 505 U.S. at 851.")
@@ -293,7 +293,7 @@ final class CaseCitationTests: XCTestCase {
         // Unlike the full cite, short form doesn't require a year.
         let rec = CaseRecord(
             name: "Doe v. Roe",
-            citations: [ReporterCitation(volume: "1", reporter: "U.S.", page: "1", kind: .official)],
+            citations: [ReporterCitation(volume: "1", reporter: "U.S.", page: "1", kind: .federalOfficial)],
             courtID: "scotus", year: nil)
         let rt = try CaseCitation.format(rec, options: .init(pincite: "5", form: .short))
         XCTAssertEqual(rt.plainText, "Doe, 1 U.S. at 5.")
@@ -307,18 +307,89 @@ final class CaseCitationTests: XCTestCase {
             "Obergefell v. Hodges, 576 U.S. 644 (2015); Obergefell, 576 U.S. at 681.")
     }
 
-    // MARK: RTF escaping of non-ASCII (curly apostrophe -> \uN{})
+    // MARK: RTF escaping of non-ASCII (curly apostrophe -> \uN? with a literal fallback)
 
     func testRTFEscapesCurlyApostrophe() throws {
         let rec = CaseRecord(
             name: "National Association v. Smith",
-            citations: [ReporterCitation(volume: "1", reporter: "U.S.", page: "1", kind: .official)],
+            citations: [ReporterCitation(volume: "1", reporter: "U.S.", page: "1", kind: .federalOfficial)],
             courtID: "scotus",
             year: 2000
         )
         let rt = try CaseCitation.format(rec)
-        // U+2019 (8217) must be escaped, not emitted raw.
-        XCTAssertTrue(rt.rtfBody.contains("\\u8217{}"), "got \(rt.rtfBody)")
+        // U+2019 (8217) must be escaped as `舗?` — one literal fallback char, not an
+        // empty group, which strict RTF readers truncate on.
+        XCTAssertTrue(rt.rtfBody.contains("\\u8217?"), "got \(rt.rtfBody)")
+        XCTAssertFalse(rt.rtfBody.contains("\\u8217{}"), "empty-group escape is non-conformant")
         XCTAssertFalse(rt.rtfBody.unicodeScalars.contains { $0.value == 0x2019 })
+    }
+
+    // MARK: style-aware reporter preference (Rule 10.3.1)
+
+    private func goodridge() -> CaseRecord {
+        // A state case carrying both a regional (N.E.2d) and a state-official (Mass.)
+        // parallel cite — the case Rule 10.3.1's style split is about.
+        CaseRecord(
+            name: "Goodridge v. Department of Public Health",
+            citations: [
+                ReporterCitation(volume: "798", reporter: "N.E.2d", page: "941", kind: .regional),
+                ReporterCitation(volume: "440", reporter: "Mass.", page: "309", kind: .stateOfficial),
+            ],
+            courtID: nil,
+            courtString: "Mass.",
+            year: 2003
+        )
+    }
+
+    func testLawReviewPrefersRegionalReporter() throws {
+        let rt = try CaseCitation.format(goodridge(), options: .init(style: .lawReview))
+        XCTAssertEqual(rt.plainText, "Goodridge v. Dep\u{2019}t of Public Health, 798 N.E.2d 941 (Mass. 2003).")
+    }
+
+    func testCourtDocumentPrefersStateOfficialReporter() throws {
+        let rt = try CaseCitation.format(goodridge(), options: .init(style: .courtDocument))
+        XCTAssertEqual(rt.plainText, "Goodridge v. Dep\u{2019}t of Public Health, 440 Mass. 309 (Mass. 2003).")
+    }
+
+    func testReporterPreferenceFallsBackWhenPreferredKindAbsent() throws {
+        // Court-document prefers the state official reporter, but when only the
+        // regional cite is present it must still be selected, not dropped.
+        let rec = CaseRecord(
+            name: "People v. Anderson",
+            citations: [ReporterCitation(volume: "6", reporter: "P.3d", page: "1", kind: .regional)],
+            courtString: "Cal.", year: 1972)
+        let rt = try CaseCitation.format(rec, options: .init(style: .courtDocument))
+        XCTAssertEqual(rt.plainText, "People v. Anderson, 6 P.3d 1 (Cal. 1972).")
+    }
+
+    // MARK: court designation from CourtListener's court_citation_string (Rule 10.4)
+
+    func testCourtStringSuppliesStateCourtParenthetical() throws {
+        // No courtID table entry for state courts; the supplied court string fills it.
+        let rec = CaseRecord(
+            name: "Doe v. Roe",
+            citations: [ReporterCitation(volume: "440", reporter: "Mass.", page: "309", kind: .stateOfficial)],
+            courtID: nil, courtString: "Mass.", year: 2003)
+        let rt = try CaseCitation.format(rec)
+        XCTAssertEqual(rt.plainText, "Doe v. Roe, 440 Mass. 309 (Mass. 2003).")
+    }
+
+    func testCourtStringScotusIsOmitted() throws {
+        // CL returns the literal "SCOTUS" for that field; Bluebook omits the court.
+        let rt = try CaseCitation.format(
+            CaseRecord(name: "Obergefell v. Hodges",
+                       citations: [ReporterCitation(volume: "576", reporter: "U.S.", page: "644", kind: .federalOfficial)],
+                       courtID: "scotus", courtString: "SCOTUS", year: 2015))
+        XCTAssertEqual(rt.plainText, "Obergefell v. Hodges, 576 U.S. 644 (2015).")
+    }
+
+    func testCourtStringPreferredOverIdTable() throws {
+        // When both are present, the explicit court string wins over the static table.
+        let rec = CaseRecord(
+            name: "Doe v. Roe",
+            citations: [ReporterCitation(volume: "1", reporter: "F. Supp. 3d", page: "1", kind: .federal)],
+            courtID: "ca9", courtString: "N.D. Cal.", year: 2018)
+        let rt = try CaseCitation.format(rec)
+        XCTAssertEqual(rt.plainText, "Doe v. Roe, 1 F. Supp. 3d 1 (N.D. Cal. 2018).")
     }
 }

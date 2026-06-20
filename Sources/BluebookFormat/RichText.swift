@@ -7,8 +7,8 @@ import Foundation
 ///
 /// RTF italic/escaping follows the same citeproc-js conventions the Zotero
 /// `bluebook-citations-fixer` plugin emits (italic = `{\i{}TEXT}`; escape
-/// `\ { }`; non-ASCII as `\uN{}`), so the output matches what that pipeline
-/// already produces downstream.
+/// `\ { }`; non-ASCII as `\uN?` with a literal `?` fallback char per the RTF
+/// spec), so the output matches what that pipeline already produces downstream.
 public struct RichText: Equatable {
     public struct Run: Equatable {
         public var text: String
@@ -63,7 +63,7 @@ public struct RichText: Equatable {
     }
 
     /// Escape a literal string for RTF: backslash/braces, then non-ASCII as
-    /// `\uN{}` (decimal codepoint) per the citeproc-js convention.
+    /// `\uN?` (decimal codepoint + one literal fallback char) per the RTF spec.
     static func escapeRTF(_ s: String) -> String {
         var out = ""
         out.reserveCapacity(s.count)
@@ -76,7 +76,13 @@ public struct RichText: Equatable {
                 if scalar.value < 0x80 {
                     out.unicodeScalars.append(scalar)
                 } else {
-                    out += "\\u\(scalar.value){}"
+                    // `\uN` must be followed by exactly one literal fallback character
+                    // for readers that don't support `\u` (RTF spec, `\uc1` default).
+                    // An empty group `{}` is *not* a fallback char — strict consumers
+                    // (Word/WordPad/RichEdit on Windows) treat the `{` as the skipped
+                    // char and then choke on the dangling `}`, silently truncating the
+                    // rest of the document. A literal `?` is the conventional fallback.
+                    out += "\\u\(scalar.value)?"
                 }
             }
         }

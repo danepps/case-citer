@@ -13,12 +13,15 @@ public enum CitationStyle: Equatable {
 
 /// A reporter citation (one of possibly several parallel cites for a case).
 public struct ReporterCitation: Equatable {
-    /// Rough Bluebook precedence for picking the citation to print.
+    /// Reporter category, used to pick which parallel cite to print. Federal
+    /// reporters always win and carry no law-review/court-document distinction;
+    /// the two *state* categories (`regional` vs. `stateOfficial`) swap precedence
+    /// by `CitationStyle` per Bluebook Rule 10.3.1 — see `Reporter.primary`.
     public enum Kind: Int, Equatable, Comparable {
-        case official = 0    // e.g. U.S. — preferred
-        case neutral = 1     // vendor-neutral / public-domain
-        case regional = 2    // e.g. S. Ct., regional reporters
-        case specialty = 3
+        case federalOfficial = 0  // U.S. Reports — the official SCOTUS reporter, top precedence
+        case federal = 1          // other federal reporters (S. Ct., L. Ed., F.2d/3d/4th, F. Supp.)
+        case regional = 2         // West regional reporters (A./N.E./N.W./P./S.E./S.W./So.)
+        case stateOfficial = 3    // a state's own official reporter (Mass., N.Y., Ill.)
         case unknown = 4
         public static func < (l: Kind, r: Kind) -> Bool { l.rawValue < r.rawValue }
     }
@@ -42,23 +45,31 @@ public struct CaseRecord: Equatable {
     public var name: String                 // raw, e.g. "Obergefell v. Hodges"
     public var citations: [ReporterCitation]
     public var courtID: String?             // CL stable id, e.g. "scotus", "ca9"
+    /// Ready-made Bluebook court abbreviation when the source supplies one (CL's
+    /// `court_citation_string`, e.g. "Mass.", "N.D. Iowa"). Preferred over the
+    /// static `courtID` table since it covers state and district courts too.
+    public var courtString: String?
     public var year: Int?
     public var docketNumber: String?
 
     public init(name: String,
                 citations: [ReporterCitation],
                 courtID: String? = nil,
+                courtString: String? = nil,
                 year: Int? = nil,
                 docketNumber: String? = nil) {
         self.name = name
         self.citations = citations
         self.courtID = courtID
+        self.courtString = courtString
         self.year = year
         self.docketNumber = docketNumber
     }
 
-    /// Preferred reporter to print: lowest `Kind` rawValue (official first).
+    /// Preferred reporter to print, law-review style by default (regional over a
+    /// state's own official reporter). Style-sensitive selection lives in
+    /// `Reporter.primary(from:style:)`.
     public var preferredCitation: ReporterCitation? {
-        citations.min { $0.kind < $1.kind }
+        Reporter.primary(from: citations, style: .lawReview)
     }
 }

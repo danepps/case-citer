@@ -58,11 +58,13 @@ public enum CaseCitation {
     }
 
     private static func formatFull(_ record: CaseRecord, options: Options) throws -> RichText {
-        guard let citation = Reporter.primary(from: record.citations),
+        guard let citation = Reporter.primary(from: record.citations, style: options.style),
               let reporterText = Reporter.render(citation, pincite: options.pincite) else {
             throw FormatError.noReporter
         }
-        guard let courtYear = Court.parenthetical(courtID: record.courtID, year: record.year) else {
+        guard let courtYear = Court.parenthetical(courtID: record.courtID,
+                                                  courtString: record.courtString,
+                                                  year: record.year) else {
             throw FormatError.noYear
         }
 
@@ -95,7 +97,7 @@ public enum CaseCitation {
     /// parenthetical, and the pincite (when present) follows `at`; with no pincite we
     /// stop at the reporter. Needs a reporter but — unlike the full cite — no year.
     private static func formatShort(_ record: CaseRecord, options: Options) throws -> RichText {
-        guard let citation = Reporter.primary(from: record.citations) else {
+        guard let citation = Reporter.primary(from: record.citations, style: options.style) else {
             throw FormatError.noReporter
         }
         let vol = citation.volume.trimmingCharacters(in: .whitespaces)

@@ -31,12 +31,29 @@ public enum Court {
         return table[id]
     }
 
-    /// The trailing parenthetical, e.g. "(9th Cir. 2018)", "(2015)" for SCOTUS,
-    /// or "(2018)" when the court id is unknown. Returns nil when there's no year
-    /// (Bluebook requires a date; caller decides how to degrade).
-    public static func parenthetical(courtID: String?, year: Int?) -> String? {
+    /// The court designation to print: an empty string means *omit* (SCOTUS), nil
+    /// means *unknown* (caller falls back to year-only). Prefers the source-supplied
+    /// `courtString` (CL's `court_citation_string`) when present, since it covers the
+    /// state and district courts the static `courtID` table doesn't — except that CL
+    /// returns the literal `"SCOTUS"` there, which Bluebook omits (the `U.S.` reporter
+    /// already implies the Court), so that one value maps to "omit".
+    static func designation(courtID: String?, courtString: String?) -> String? {
+        if let s = courtString?.trimmingCharacters(in: .whitespaces), !s.isEmpty {
+            if s == "SCOTUS" || courtID == "scotus" { return "" }   // omit for SCOTUS
+            return s
+        }
+        return abbreviation(for: courtID)
+    }
+
+    /// The trailing parenthetical, e.g. "(9th Cir. 2018)", "(Mass. 1998)", "(2015)"
+    /// for SCOTUS, or "(2018)" when the court is unknown. Returns nil when there's no
+    /// year (Bluebook requires a date; caller decides how to degrade). `courtString`
+    /// is CL's ready-made abbreviation and takes precedence over the `courtID` table.
+    public static func parenthetical(courtID: String?,
+                                     courtString: String? = nil,
+                                     year: Int?) -> String? {
         guard let year = year else { return nil }
-        let court = abbreviation(for: courtID)
+        let court = designation(courtID: courtID, courtString: courtString)
         if let court = court, !court.isEmpty {
             return "(\(court) \(year))"
         }
