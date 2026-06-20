@@ -359,6 +359,20 @@ final class SearchViewModel: ObservableObject {
         if let rich = reformat(cite) { cite.rich = rich; pendingCites[index] = cite }
     }
 
+    /// The pincite/parenthetical/short-form fields are shared scratch state for *both*
+    /// the in-progress cite and the committed-cite editor. Editing a committed cite loads
+    /// its values into them (see `beginEditingCiteOptions`); call this when the edit ends
+    /// so those values don't leak into — and silently duplicate themselves onto — the next
+    /// new cite the user starts.
+    func endCiteOptionsEditing() {
+        pincite = ""
+        parenthetical = ""
+        shortForm = false
+        shortTitle = ""
+        editingCiteIndex = nil
+        showingCiteOptions = false
+    }
+
     /// Re-format the cursor-focused cite with `signal` (or clear it), updating its bubble
     /// text and the formatted `rich` joined at insert time.
     func applySignalToFocusedCite(_ signal: Signal?) {

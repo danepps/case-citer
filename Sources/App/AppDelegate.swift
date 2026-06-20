@@ -131,11 +131,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model?.pincite = ""
         model?.parenthetical = ""
         model?.signal = nil
+        model?.shortForm = false
+        model?.shortTitle = ""
         model?.statusMessage = nil
         model?.pendingCites = []
         model?.citeFocus = .none
         model?.editingCiteIndex = nil
         model?.showingCiteOptions = false
+        model?.showingSignalPicker = false
         model?.showCount += 1 // re-focus the search field (see SearchView)
         NSApp.activate(ignoringOtherApps: true)
         panel.positionTopCentered()

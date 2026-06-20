@@ -92,10 +92,10 @@ struct SearchView: View {
             onCommit: {
                 if let i = model.editingCiteIndex {
                     // Editing a committed cite: write the options back and keep it
-                    // selected so ◀/▶ keep working.
+                    // selected so ◀/▶ keep working. Clear the shared scratch fields so the
+                    // edited cite's pincite/short-form don't leak into the next new cite.
                     model.applyCiteOptions(toCiteAt: i)
-                    model.editingCiteIndex = nil
-                    model.showingCiteOptions = false
+                    model.endCiteOptionsEditing()
                     model.citeFocus = .selected(i)
                 } else if model.addCurrentCite() {
                     // empty editor / new cite path resets focus on its own
@@ -104,12 +104,14 @@ struct SearchView: View {
             },
             onClose: {
                 // ▲ / esc: close without changing the cite; re-select it if we were
-                // editing a committed one.
+                // editing a committed one, and clear the scratch fields the editor loaded
+                // so they don't leak into the next new cite.
                 if let i = model.editingCiteIndex {
-                    model.editingCiteIndex = nil
+                    model.endCiteOptionsEditing()
                     model.citeFocus = .selected(i)
+                } else {
+                    model.showingCiteOptions = false
                 }
-                model.showingCiteOptions = false
                 searchFocused = true
             }
         )
@@ -271,6 +273,11 @@ struct SearchView: View {
             HStack(spacing: 5) {
                 if let sig = cite.signalText { Text(sig).italic() }
                 Text(cite.label).italic(cite.form == .short).lineLimit(1).truncationMode(.tail)
+                // Surface the pincite (if any) so the bubble shows whether one is set and
+                // its value; ▼ opens the editor to change it.
+                if let p = cite.pincite, !p.isEmpty {
+                    Text("at \(p)").foregroundStyle(.secondary).layoutPriority(1)
+                }
                 Image(systemName: "xmark.circle.fill").font(.caption)
             }
             .font(.title3)
@@ -505,9 +512,13 @@ private struct ResultRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             if let preview = shortPreview {
-                (Text("short form  ").foregroundStyle(.tertiary) + preview)
+                // Cite stays accent-blue (matches the books icon); the label is a quiet
+                // secondary. On the selected row the background is also accent-tinted, so
+                // brighten the whole line there to keep the blue legible against it.
+                (Text("short form  ").foregroundStyle(Color.secondary)
+                    + preview.foregroundStyle(Color.accentColor))
                     .font(.caption)
-                    .foregroundStyle(Color.accentColor)
+                    .brightness(selected ? 0.3 : 0)
             }
         }
     }
