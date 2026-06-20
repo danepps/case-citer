@@ -84,18 +84,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = SearchPanel(rootView: view)
     }
 
-    /// Make Backspace peel off the bubble before the cursor when the query is empty
-    /// (the signal chip first, then the most recent cite). A focused TextField's field
-    /// editor consumes ⌫ before SwiftUI's `onKeyPress` sees it, so we catch it here, at
-    /// the AppKit level, before it reaches the editor. Returning nil swallows the event;
-    /// returning it lets the field delete a character as usual.
+    /// Catch keys a focused TextField's field editor would otherwise swallow before
+    /// SwiftUI's `onKeyPress` could see them, at the AppKit level:
+    ///  • Backspace on an empty query peels off the bubble before the cursor (the signal
+    ///    chip first, then the most recent cite).
+    ///  • ⌃F flips short form — even while a popover field holds focus, where the field
+    ///    editor would otherwise eat ⌃F as its "move forward one character" binding.
+    /// Returning nil swallows the event; returning it lets the field handle the key.
     private func installBackspaceMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let keyCode = event.keyCode   // pull the scalar out so NSEvent doesn't cross the actor hop
+            // Pull scalars out so NSEvent doesn't cross the actor hop.
+            let keyCode = event.keyCode
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let consume = MainActor.assumeIsolated { () -> Bool in
-                guard let self, let model = self.model, self.panel?.isKeyWindow == true,
-                      keyCode == 51,                        // kVK_Delete (Backspace)
-                      model.query.isEmpty,                  // not mid-edit
+                guard let self, let model = self.model, self.panel?.isKeyWindow == true
+                else { return false }
+                // ⌃F: flip short form, in or out of the cite-options popover.
+                if keyCode == 3, mods == .control {   // kVK_ANSI_F, Control only
+                    if model.showingCiteOptions { model.toggleShortFormInCiteOptions() }
+                    else { model.toggleShortForm() }
+                    return true
+                }
+                guard keyCode == 51,                  // kVK_Delete (Backspace)
+                      model.query.isEmpty,            // not mid-edit
                       !model.showingCiteOptions, !model.showingSignalPicker  // not in a popover field
                 else { return false }
                 // With the cite cursor parked on a bubble, ⌫ removes that one.

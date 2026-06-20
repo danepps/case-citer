@@ -121,27 +121,76 @@ public enum CaseName {
             return shortenParty(abbreviate(String(normalized.dropFirst(phrase.count))))
         }
 
-        let sides = normalized.components(separatedBy: " v. ")
-        let primary = (sides.first ?? normalized).trimmingCharacters(in: .whitespaces)
-        // Skip a generic governmental/geographic first party for the opposing one.
+        let sides = normalized.components(separatedBy: " v. ").map { $0.trimmingCharacters(in: .whitespaces) }
+        let primary = sides.first ?? normalized
         let chosen: String
         if sides.count >= 2, isGenericParty(primary) {
-            chosen = sides[1].trimmingCharacters(in: .whitespaces)
+            // A common governmental litigant on the left (United States, State, People,
+            // City of …): the distinctive party is the opponent — e.g. *Nixon* in
+            // United States v. Nixon.
+            chosen = sides[1]
+        } else if sides.count >= 2, isStateName(primary), isPersonalName(sides[1]) {
+            // A *named* state prosecuting/suing an individual: the short form is that
+            // individual, not the state — *Garner* in Tennessee v. Garner. But a state
+            // opposite another state or a federal agency keeps the state (Arizona v.
+            // United States → *Arizona*; Massachusetts v. EPA → *Massachusetts*).
+            chosen = sides[1]
         } else {
             chosen = primary
         }
+        // A state standing alone as a party isn't abbreviated (Cal.) or collapsed to a
+        // word ("New York" → "York"); keep it whole.
+        if isStateName(chosen) { return chosen }
         return shortenParty(abbreviate(chosen))
     }
 
     /// A party that's a generic governmental/geographic litigant rather than a
-    /// distinctive name — the one Bluebook drops from the short form. A *named*
-    /// state (`Arizona`, `California`) is **not** generic: `Arizona v. United States`
-    /// shortens to *Arizona*, while `United States v. Nixon` shortens to *Nixon*.
+    /// distinctive name — the one Bluebook drops from the short form. A *named* state
+    /// (`Arizona`, `California`) is **not** generic here: opposite another governmental
+    /// party it stays (`Arizona v. United States` → *Arizona*); it yields only to an
+    /// *individual* opponent, handled separately in `shortTitle` via `isStateName`.
     private static func isGenericParty(_ party: String) -> Bool {
         let lower = party.lowercased().trimmingCharacters(in: .whitespaces)
         if lower == "united states" || lower == "united states of america" { return true }
         let leads = ["state", "commonwealth", "people", "city of", "county of", "town of", "village of"]
         return leads.contains { lower == $0 || lower.hasPrefix($0 + " ") }
+    }
+
+    /// The 50 states (plus D.C. / Puerto Rico), lowercased, for spotting a state acting
+    /// as a governmental party. Matched whole (not by prefix) so an organization that
+    /// merely starts with a state name — *New York Times Co.* — isn't caught.
+    private static let usStates: Set<String> = [
+        "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+        "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho", "illinois",
+        "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland",
+        "massachusetts", "michigan", "minnesota", "mississippi", "missouri", "montana",
+        "nebraska", "nevada", "new hampshire", "new jersey", "new mexico", "new york",
+        "north carolina", "north dakota", "ohio", "oklahoma", "oregon", "pennsylvania",
+        "rhode island", "south carolina", "south dakota", "tennessee", "texas", "utah",
+        "vermont", "virginia", "washington", "west virginia", "wisconsin", "wyoming",
+        "district of columbia", "puerto rico",
+    ]
+
+    private static func isStateName(_ party: String) -> Bool {
+        usStates.contains(party.lowercased().trimmingCharacters(in: .whitespaces))
+    }
+
+    /// A party that reads as an individual (collapsible to a surname) rather than a
+    /// government, geographic unit, organization, or acronym — used to decide whether a
+    /// state-vs-X caption shortens to X (Tennessee v. *Garner*) or stays the state
+    /// (Massachusetts v. EPA, California v. Texas).
+    private static func isPersonalName(_ party: String) -> Bool {
+        !isGenericParty(party) && !isStateName(party)
+            && !looksLikeOrganization(party) && !isAcronym(party)
+    }
+
+    /// A short all-caps token like `EPA`, `FCC`, `NLRB` — a governmental/organizational
+    /// acronym, not a person.
+    private static func isAcronym(_ party: String) -> Bool {
+        let core = party.replacingOccurrences(of: ".", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard (2...5).contains(core.count) else { return false }
+        return core.allSatisfy { $0.isUppercase }
     }
 
     /// Reduce a (already-abbreviated) party to its short-form token(s): a personal

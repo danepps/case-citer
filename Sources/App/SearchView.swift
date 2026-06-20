@@ -187,11 +187,9 @@ struct SearchView: View {
                 if model.showingSignalPicker { model.closeSignalPicker() } else { model.openSignalPicker() }
                 return .handled
             }
-            .onKeyPress(keys: ["f"]) { press in
-                guard press.modifiers.contains(.control) else { return .ignored }
-                model.toggleShortForm()
-                return .handled
-            }
+            // NOTE: ⌃F (toggle short form) is handled by the local NSEvent monitor in
+            // AppDelegate — the field editor eats ⌃F (its "move forward" binding) before
+            // SwiftUI's onKeyPress can see it, the same reason Backspace is caught there.
             optionsMenu
             settingsButton
         }
@@ -456,7 +454,7 @@ private struct CiteOptionsPopover: View {
             if shortForm {
                 labeledField("Short title", placeholder: "e.g. Obergefell", text: $shortTitle, field: .shortTitle)
             }
-            Text("⏎ add cite · ⇥ next field · esc")
+            Text("⏎ add cite · ⇥ next field · ⌃F \(shortForm ? "full" : "short") · esc")
                 .font(.caption).foregroundStyle(.tertiary)
         }
         .padding(14)
@@ -466,6 +464,11 @@ private struct CiteOptionsPopover: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
         .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
         .onAppear { field = .pincite }
+        // Toggling back to full (⌃F) removes the Short title field; if focus was there,
+        // pull it back to Pincite so keyboard focus isn't stranded.
+        .onChange(of: shortForm) { _, isShort in
+            if !isShort, field == .shortTitle { field = .pincite }
+        }
     }
 
     /// ⇥ cycles through the visible fields in order (short title last, only when shown).

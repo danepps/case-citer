@@ -222,8 +222,19 @@ final class CaseCitationTests: XCTestCase {
     }
 
     func testShortTitleKeepsNamedState() {
-        // A named state is distinctive and stays as the short title.
+        // A named state opposite another governmental party stays as the short title.
         XCTAssertEqual(CaseName.shortTitle("Arizona v. United States"), "Arizona")
+        XCTAssertEqual(CaseName.shortTitle("California v. Texas"), "California")
+        // ...including a federal agency acronym (a governmental opponent, not a person).
+        XCTAssertEqual(CaseName.shortTitle("Massachusetts v. EPA"), "Massachusetts")
+    }
+
+    func testShortTitleStateVersusIndividual() {
+        // A state prosecuting/suing an individual shortens to the individual, not the
+        // state (Rule 10.9): the distinctive party is the defendant's surname.
+        XCTAssertEqual(CaseName.shortTitle("Tennessee v. Garner"), "Garner")
+        XCTAssertEqual(CaseName.shortTitle("Michigan v. Long"), "Long")
+        XCTAssertEqual(CaseName.shortTitle("New York v. Ferber"), "Ferber")
     }
 
     func testShortTitleOrgKeepsAbbreviatedName() {

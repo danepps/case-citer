@@ -155,13 +155,21 @@ final class SearchViewModel: ObservableObject {
         let tokens = q.split(separator: " ").map(String.init)
         var seen = Set<String>()
         let combined = (local + web).filter { seen.insert(identity($0)).inserted }
+        // The bundled SCOTUS index is ordered by citation count (built `citeCount desc`),
+        // so a record's position in `local` is its cite rank — lower is more-cited. Cases
+        // not in the index (lower courts, the SCOTUS long tail) get Int.max and fall
+        // through to the specificity/offset tiebreaks below.
+        var citeRank: [String: Int] = [:]
+        for (i, r) in local.enumerated() { citeRank[identity(r)] = i }
         return combined.enumerated()
-            .map { offset, r in (r, score(r, tokens: tokens, query: q), courtProminence(r), offset) }
+            .map { offset, r in (r, score(r, tokens: tokens, query: q), courtProminence(r),
+                                 citeRank[identity(r)] ?? .max, offset) }
             .sorted { a, b in
                 if a.1.tier != b.1.tier { return a.1.tier > b.1.tier }             // relevance tier
                 if a.2 != b.2 { return a.2 > b.2 }                                  // court prominence
+                if a.3 != b.3 { return a.3 < b.3 }                                  // citation count (SCOTUS index)
                 if a.1.specificity != b.1.specificity { return a.1.specificity > b.1.specificity }
-                return a.3 < b.3                                                    // stable: cache before web
+                return a.4 < b.4                                                    // stable: cache before web
             }
             .map(\.0)
     }
@@ -182,19 +190,28 @@ final class SearchViewModel: ObservableObject {
         return 1
     }
 
-    /// Name-match relevance: a coarse tier (exact > prefix > all-tokens-as-words >
+    /// Name-match relevance: a coarse tier (exact > party-prefix > all-tokens-as-words >
     /// all-tokens-substring > none) plus a specificity ratio (matched words / total),
     /// so a tight match like "Roe v. Wade" outranks a sprawling caption that merely
     /// contains the same tokens.
+    ///
+    /// "Party-prefix" means the query begins one of the parties (either side of "v."),
+    /// not just the whole caption. Landmark cases routinely put the person second —
+    /// *Tennessee v. Garner*, *United States v. Nixon* — so a surname query must match the
+    /// respondent as strongly as it would a petitioner; otherwise a `Garner v. …` lower-
+    /// court case (a whole-caption prefix) buries the SCOTUS case the user means. With
+    /// both at this tier, the SCOTUS court-prominence tiebreak surfaces the right one.
     nonisolated private static func score(_ r: SearchResult, tokens: [String], query q: String) -> (tier: Int, specificity: Double) {
         let name = (r.caseName ?? "").lowercased()
         let words = name.split { !$0.isLetter && !$0.isNumber }.map(String.init)
         let wordSet = Set(words)
         let matched = tokens.filter(wordSet.contains).count
         let specificity = words.isEmpty ? 0 : Double(matched) / Double(words.count)
+        // Each party as it appears in the caption (trimmed), e.g. ["tennessee", "garner"].
+        let parties = name.components(separatedBy: " v. ").map { $0.trimmingCharacters(in: .whitespaces) }
         let tier: Int
         if name == q { tier = 4 }
-        else if name.hasPrefix(q) { tier = 3 }
+        else if name.hasPrefix(q) || parties.contains(where: { $0.hasPrefix(q) }) { tier = 3 }
         else if !tokens.isEmpty && tokens.allSatisfy(wordSet.contains) { tier = 2 }
         else if !tokens.isEmpty && tokens.allSatisfy(name.contains) { tier = 1 }
         else { tier = 0 }
@@ -263,6 +280,21 @@ final class SearchViewModel: ObservableObject {
         if shortForm, shortTitle.isEmpty, let record = selectedRecord {
             shortTitle = CaseName.shortTitle(record.name)
         }
+    }
+
+    /// ⌃F from inside the cite-options popover: flip the scratch `shortForm` the popover
+    /// edits (applied on commit), prefilling the derived short title. Unlike
+    /// `toggleShortForm`, this never reformats a committed cite directly — when the popover
+    /// is editing one, the change is staged in the scratch fields and written back by
+    /// `applyCiteOptions` on ⏎. The short-title source is the cite being edited if there is
+    /// one, otherwise the current selection.
+    func toggleShortFormInCiteOptions() {
+        shortForm.toggle()
+        guard shortForm, shortTitle.isEmpty else { return }
+        let name = editingCiteIndex
+            .flatMap { pendingCites.indices.contains($0) ? pendingCites[$0].record.name : nil }
+            ?? selectedRecord?.name
+        if let name { shortTitle = CaseName.shortTitle(name) }
     }
 
     // MARK: cite cursor (edit an already-committed cite)
