@@ -228,6 +228,11 @@ final class SearchViewModel: ObservableObject {
             return "CourtListener is slow — try again"
         case SearchClient.ClientError.transport:
             return "Offline — check your connection"
+        case SearchClient.ClientError.decoding(let detail):
+            // Keep the user-facing text concise; the detail (CourtListener changed its
+            // response shape?) goes to the log so a regression isn't a silent mystery.
+            print("CourtListener decode failure: \(detail)")
+            return "Unexpected response — try again"
         default:
             return "Search failed"
         }

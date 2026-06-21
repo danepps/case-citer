@@ -15,21 +15,35 @@ public final class SearchClient {
         case http(Int)
         case timedOut
         case transport(String)
+        /// The response wasn't the JSON we expect — usually CourtListener changed its
+        /// shape. Carries a diagnostic detail; the UI shows a concise message instead.
+        case decoding(String)
     }
 
-    private let apiKey: String?
+    private let apiKeyProvider: () -> String?
     private let session: URLSession
     private let cache: SearchCache?
     private let base = URL(string: "https://www.courtlistener.com/api/rest/v4/search/")!
 
+    /// - Parameter apiKeyProvider: evaluated *per request*, so a token toggled in
+    ///   Settings takes effect on the next search without relaunching the app. Return
+    ///   `nil`/empty for an anonymous request.
     /// - Parameter cache: result cache (defaults to a disk-backed one). Pass `nil`
     ///   to disable caching — e.g. in tests that assert on live network behavior.
-    public init(apiKey: String?,
+    public init(apiKeyProvider: @escaping () -> String?,
                 session: URLSession? = nil,
                 cache: SearchCache? = SearchCache(diskURL: SearchCache.defaultDiskURL())) {
-        self.apiKey = apiKey
+        self.apiKeyProvider = apiKeyProvider
         self.session = session ?? Self.makeSession()
         self.cache = cache
+    }
+
+    /// Convenience for a fixed token (or anonymous): a one-shot CLI call or a test
+    /// where the token won't change over the client's lifetime.
+    public convenience init(apiKey: String?,
+                            session: URLSession? = nil,
+                            cache: SearchCache? = SearchCache(diskURL: SearchCache.defaultDiskURL())) {
+        self.init(apiKeyProvider: { apiKey }, session: session, cache: cache)
     }
 
     /// Dedicated session for talking to CourtListener (behind a CDN, AWS CloudFront).
@@ -88,7 +102,7 @@ public final class SearchClient {
         // A real User-Agent: CDNs are likelier to fast-path an identified client than
         // a bare default, and it's polite to a free public API.
         request.setValue("CaseCiter/1.0 (macOS; +https://www.courtlistener.com)", forHTTPHeaderField: "User-Agent")
-        if let apiKey, !apiKey.isEmpty {
+        if let apiKey = apiKeyProvider(), !apiKey.isEmpty {
             request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
         }
 
@@ -98,7 +112,14 @@ public final class SearchClient {
             throw ClientError.http(http.statusCode)
         }
 
-        return try JSONDecoder().decode(SearchResponse.self, from: data).results
+        // A decode failure here means the payload wasn't the search shape we expect
+        // (e.g. CourtListener changed its response). Tag it distinctly from transport
+        // errors so the UI can stay concise while the detail survives for diagnostics.
+        do {
+            return try JSONDecoder().decode(SearchResponse.self, from: data).results
+        } catch {
+            throw ClientError.decoding(String(describing: error))
+        }
     }
 
     /// Run `request`, retrying on timeout up to `attempts` times. A stalled HTTP/3

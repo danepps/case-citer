@@ -72,7 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setUpPanel() {
-        let client = SearchClient(apiKey: AppSettings.shared.effectiveAPIKey)
+        // Read the token per request, not once at launch: toggling the token in
+        // Settings must affect the next search without relaunching the app.
+        let client = SearchClient(apiKeyProvider: { AppSettings.shared.effectiveAPIKey })
         let model = SearchViewModel(client: client)
         self.model = model
         let view = SearchView(
