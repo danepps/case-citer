@@ -5,10 +5,11 @@ import Foundation
 /// `CitationStyle`.
 ///
 /// Deliberately **permissive**: it abbreviates the common, unambiguous words and
-/// leaves everything else verbatim. It does *not* yet drop subsequent parties,
-/// "et al.", "the State of", procedural-history junk, etc. — those rules are
-/// error-prone and are grown test-first. The aim is "never wrong by abbreviating
-/// something it shouldn't", at the cost of "sometimes less abbreviated than ideal".
+/// leaves everything else verbatim. It drops subsequent parties (Rule 10.2.1(a),
+/// see `firstPartyEachSide`) but otherwise leaves "the State of", procedural-history
+/// junk, etc. alone — those rules are error-prone and are grown test-first. The aim
+/// is "never wrong by abbreviating something it shouldn't", at the cost of
+/// "sometimes less abbreviated than ideal".
 public enum CaseName {
 
     /// Table T6: words abbreviated in case names. Keyed by lowercased whole word.
@@ -97,7 +98,7 @@ public enum CaseName {
     /// but any procedural phrase stays italic; in court-document mode the whole
     /// name is italic.
     public static func render(_ rawName: String, style: CitationStyle) -> RichText {
-        let abbreviated = abbreviate(normalizeV(rawName))
+        let abbreviated = abbreviate(bluebookCaseName(rawName))
 
         if style == .courtDocument {
             return .italic(abbreviated)
@@ -114,7 +115,9 @@ public enum CaseName {
     /// *plain* string (the caller italicizes it) and is deliberately heuristic — the
     /// UI offers an editable override for the captions it guesses wrong.
     public static func shortTitle(_ rawName: String) -> String {
-        let normalized = normalizeV(rawName)
+        // Reduce multi-party sides to the first party up front, so a class-action
+        // caption ("Smith, Jones, … v. Acme") yields a clean short title.
+        let normalized = firstPartyEachSide(rawName)
 
         // "In re X" / "Ex parte X": the subject after the phrase is the short title.
         for phrase in leadingProceduralPhrases where normalized.hasPrefix(phrase) {
@@ -212,7 +215,7 @@ public enum CaseName {
                        "r.r.", "ry.", "mfg.", "nat\u{2019}l", "int\u{2019}l", "ins.", "bros.",
                        "board", "bureau", "commission", "dep\u{2019}t", "department",
                        "univ.", "university", "bank", "school", "church", "trust",
-                       "fund", "company", "council", "union", "found"]
+                       "fund", "company", "council", "union", "found", "authority"]
         return markers.contains { lower.contains($0) }
     }
 
@@ -227,6 +230,110 @@ public enum CaseName {
         }
         let range = NSRange(name.startIndex..<name.endIndex, in: name)
         return re.stringByReplacingMatches(in: name, range: range, withTemplate: " v. ")
+    }
+
+    /// Whole words that legitimately precede a "`. `"-then-capital inside a party name
+    /// (titles and Bluebook abbreviations), so they are *not* read as a sentence
+    /// boundary by `truncateAtConsolidatedBoundary`. Abbreviations with internal
+    /// periods or apostrophes ("U.S.", "Dep't") never reach the 2+-letter test, so
+    /// only the plain-letter stems need listing here.
+    static let boundarySafeAbbreviations: Set<String> = [
+        "no", "dr", "mr", "mrs", "ms", "st", "co", "corp", "inc", "ltd", "jr", "sr",
+        "esq", "hon", "bros", "mfg", "dev", "dist", "div", "educ", "elec", "envtl",
+        "fed", "hosp", "indus", "ins", "lab", "labs", "mach", "serv", "servs", "sys",
+        "transp", "univ", "dept", "etc", "vs", "al", "ry", "rr", "ave", "rd",
+        "rel", "ex",  // "ex rel." relator phrase
+    ]
+
+    /// CourtListener glues a consolidated cross-appeal onto a caption by re-listing the
+    /// whole thing after the defendant, joined only by a period ("…Transportation
+    /// Authority. Hester Lee Searles … v. …"). Cut at the first such sentence boundary
+    /// — a 2+-letter whole word, then a period, a space, and a capital — so only the
+    /// first case survives. Recognized abbreviations (`boundarySafeAbbreviations`,
+    /// plus initials/acronyms, which can't match the 2+-letter word) are not boundaries.
+    static func truncateAtConsolidatedBoundary(_ name: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: "([A-Za-z]{2,})\\. [A-Z]") else {
+            return name
+        }
+        let ns = name as NSString
+        let matches = re.matches(in: name, range: NSRange(location: 0, length: ns.length))
+        for m in matches {
+            let word = ns.substring(with: m.range(at: 1))
+            if boundarySafeAbbreviations.contains(word.lowercased()) { continue }
+            // Keep everything up to and including the boundary word (drop its period).
+            return ns.substring(to: m.range(at: 1).location + m.range(at: 1).length)
+        }
+        return name
+    }
+
+    /// Trailing party designations that belong to the *first* party rather than
+    /// signalling a second one — so "Cota, Jr." or "Acme, Inc." aren't mistaken for a
+    /// party list. Matched case-insensitively against a whole comma-separated segment.
+    static let partyDesignations: Set<String> = [
+        "jr.", "jr", "sr.", "sr", "ii", "iii", "iv",
+        "inc.", "inc", "co.", "corp.", "llc", "l.l.c.", "llp", "l.l.p.",
+        "n.a.", "ltd.", "ltd", "esq.", "p.c.", "l.p.", "p.a.",
+    ]
+
+    /// Reduce a CourtListener caption to a clean two-party case name (Rule 10.2.1(a)).
+    /// Two independent forms of bloat are stripped:
+    ///
+    /// 1. **Chained `v.` segments.** A real caption has exactly two sides, but
+    ///    CourtListener concatenates consolidated cases and cross-appeals into a chain
+    ///    ("Harris v. Stephens v. Stephens", "O'Connor v. Clayter v. … v. United
+    ///    States"). Only the first two sides are kept.
+    /// 2. **Party lists within a side.** When a side lists several parties, cite only
+    ///    the first and drop the rest — *without* an "et al." (see `firstParty`).
+    ///
+    /// A plain two-party caption passes through untouched. Returns the `v.`-normalized
+    /// string so callers can feed it straight into `abbreviate`.
+    public static func firstPartyEachSide(_ rawName: String) -> String {
+        normalizeV(truncateAtConsolidatedBoundary(rawName))
+            .components(separatedBy: " v. ")
+            .prefix(2)
+            .map(firstParty)
+            .joined(separator: " v. ")
+    }
+
+    /// The case name as Bluebook wants it displayed: `firstPartyEachSide` plus
+    /// Rule 10.2.1(g) — an individual party is reduced to a surname, while business,
+    /// governmental, and geographic party names are kept whole (see `surnameOnly`).
+    /// This is the form shown in the picker and fed to `render`.
+    public static func bluebookCaseName(_ rawName: String) -> String {
+        firstPartyEachSide(rawName)
+            .components(separatedBy: " v. ")
+            .map(surnameOnly)
+            .joined(separator: " v. ")
+    }
+
+    /// Reduce a party to its surname when it reads as an individual with a plain
+    /// first/(middle)/last shape (Rule 10.2.1(g)). Organizations, governmental and
+    /// state parties, and acronyms are kept whole. A 4+-token string is left intact
+    /// too: it's far likelier a space-concatenated multi-party caption (where the last
+    /// token is the *wrong* party's surname) than one person's name.
+    private static func surnameOnly(_ party: String) -> String {
+        let p = party.trimmingCharacters(in: .whitespaces)
+        guard isPersonalName(p) else { return p }
+        let tokens = p.split(separator: " ").map(String.init)
+        guard (2...3).contains(tokens.count) else { return p }
+        return tokens.last ?? p
+    }
+
+    /// First listed party on one side, keeping any trailing designation that belongs
+    /// to it (see `partyDesignations`). Everything from the first genuine party-list
+    /// comma onward — including a trailing "et al." or "and …" — is dropped.
+    private static func firstParty(_ side: String) -> String {
+        let segments = side.components(separatedBy: ",")
+        guard segments.count > 1 else { return side.trimmingCharacters(in: .whitespaces) }
+        var result = segments[0].trimmingCharacters(in: .whitespaces)
+        var i = 1
+        while i < segments.count {
+            let seg = segments[i].trimmingCharacters(in: .whitespaces)
+            guard partyDesignations.contains(seg.lowercased()) else { break }
+            result += ", " + seg
+            i += 1
+        }
+        return result
     }
 
     /// Produce a roman `RichText` with leading "In re "/"Ex parte " and inline

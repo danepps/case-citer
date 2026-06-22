@@ -501,7 +501,7 @@ private struct ResultRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(result.caseName ?? "—").fontWeight(selected ? .semibold : .regular)
+            Text(result.caseName.map(CaseName.bluebookCaseName) ?? "—").fontWeight(selected ? .semibold : .regular)
             HStack(spacing: 8) {
                 if let cite = result.preferredCitationText { Text(cite) }
                 if let court = result.court { Text(court) }
