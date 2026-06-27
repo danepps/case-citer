@@ -45,6 +45,8 @@ public enum CaseName {
         "machine": "Mach.",
         "national": "Nat\u{2019}l",
         "number": "No.",
+        "product": "Prod.",
+        "products": "Prods.",
         "service": "Serv.",
         "services": "Servs.",
         "system": "Sys.",

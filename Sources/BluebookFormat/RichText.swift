@@ -57,9 +57,14 @@ public struct RichText: Equatable {
     }
 
     /// A complete RTF document suitable for `NSPasteboard` (`.rtf` type).
+    ///
+    /// Deliberately carries **no font table or font selection** — only the italic
+    /// styling in `rtfBody`. Emitting `\fonttbl`/`\fN` forces the destination to
+    /// render the citation in that face (e.g. Times New Roman), overriding the
+    /// surrounding document's font on paste. With no font specified, the paste
+    /// target keeps its own font and only the italics carry over.
     public var rtfDocument: String {
-        "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Times New Roman;}}\\f0 "
-            + rtfBody + "}"
+        "{\\rtf1\\ansi\\ansicpg1252 " + rtfBody + "}"
     }
 
     /// Escape a literal string for RTF: backslash/braces, then non-ASCII as

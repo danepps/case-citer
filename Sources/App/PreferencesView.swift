@@ -26,6 +26,10 @@ final class PreferencesModel: ObservableObject {
         didSet { AppSettings.shared.style = lawReviewStyle ? .lawReview : .courtDocument }
     }
 
+    @Published var mergePaste: Bool {
+        didSet { AppSettings.shared.mergePaste = mergePaste }
+    }
+
     @Published var appearance: AppAppearance {
         didSet {
             AppSettings.shared.appearance = appearance
@@ -48,6 +52,7 @@ final class PreferencesModel: ObservableObject {
     init() {
         launchAtLogin = LaunchAtLogin.isEnabled
         lawReviewStyle = AppSettings.shared.style == .lawReview
+        mergePaste = AppSettings.shared.mergePaste
         useCustomAPIKey = AppSettings.shared.useCustomAPIKey
         apiKey = AppSettings.shared.apiKey ?? ""
         appearance = AppSettings.shared.appearance
@@ -94,6 +99,15 @@ struct PreferencesView: View {
                 }
                 .pickerStyle(.radioGroup)
                 Text("Court documents italicize the full case name; law-review footnotes leave it roman.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Paste") {
+                Toggle("Merge formatting paste (\u{2318}\u{21E7}\u{2325}V)", isOn: $model.mergePaste)
+                Text(model.mergePaste
+                     ? "Sends \u{2318}\u{21E7}\u{2325}V instead of \u{2318}V. Bind that combo to a Word “Merge Formatting” macro so citations take your document’s font and size while keeping case-name italics."
+                     : "Sends a plain \u{2318}V. Works everywhere; the citation keeps its own formatting.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
