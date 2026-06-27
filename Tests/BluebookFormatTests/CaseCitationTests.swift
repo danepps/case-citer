@@ -133,6 +133,13 @@ final class CaseCitationTests: XCTestCase {
         XCTAssertEqual(abbreviated, "Nat\u{2019}l Educ. Ass\u{2019}n")
     }
 
+    func testT6ProductsAbbreviation() throws {
+        // Product[s] -> Prod[s]. (Table T6), still abbreviated next to Co./Liab.
+        XCTAssertEqual(CaseName.abbreviate("Products Liability"), "Prods. Liability")
+        XCTAssertEqual(CaseName.abbreviate("Acme Products Company"), "Acme Prods. Co.")
+        XCTAssertEqual(CaseName.abbreviate("Acme Product Co."), "Acme Prod. Co.")
+    }
+
     // MARK: procedural phrase stays italic in BOTH modes
 
     func testProceduralPhraseLawReview() throws {

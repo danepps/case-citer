@@ -29,6 +29,16 @@ final class AppSettings {
         static let useCustomAPIKey = "useCustomAPIKey"  // Bool; default false (anonymous)
         static let signals = "signals"              // [String]
         static let appearance = "appearance"        // "auto" | "light" | "dark"
+        static let mergePaste = "mergePaste"        // Bool; default false (plain ⌘V)
+    }
+
+    /// Paste style for the auto-insert. **Default false** → a plain ⌘V (Keep Source
+    /// Formatting), which works everywhere. When true the app sends ⌘⇧⌥V instead, the
+    /// combo a Word "Merge Formatting" macro is bound to, so the citation adopts the
+    /// destination's font/size while keeping the case-name italics (see `Paster`).
+    var mergePaste: Bool {
+        get { defaults.bool(forKey: Key.mergePaste) }
+        set { defaults.set(newValue, forKey: Key.mergePaste) }
     }
 
     /// Window appearance. Default **auto** (follow the system setting).
