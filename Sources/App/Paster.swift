@@ -32,30 +32,41 @@ enum Paster {
     /// first so focus actually returns to the target.
     static func paste(into app: NSRunningApplication?) {
         app?.activate(options: [])
+        let modifiers = pasteModifiers(for: app)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            synthesizePaste()
+            synthesizePaste(modifiers: modifiers)
         }
     }
 
+    /// Bundle identifiers of the apps whose "Merge Formatting" macro the ⌘⇧⌥V combo
+    /// targets. The special combo is meaningless anywhere else, so we only send it here.
+    private static let mergePasteApps: Set<String> = [
+        "com.microsoft.Word",
+        "com.microsoft.Outlook",
+    ]
+
     /// Modifiers for the synthesized paste. Plain **⌘V** by default; when the
-    /// "merge formatting paste" setting is on we send **⌘⇧⌥V** instead — the combo a
-    /// Word `Selection.PasteAndFormat wdFormatSurroundingFormattingWithEmphasis`
+    /// "merge formatting paste" setting is on *and* the destination is Word or Outlook
+    /// we send **⌘⇧⌥V** instead — the combo a Word
+    /// `Selection.PasteAndFormat wdFormatSurroundingFormattingWithEmphasis`
     /// ("Merge Formatting") macro is bound to, so the citation adopts the destination
     /// paragraph's font/size while keeping the case-name italics from our RTF. (A plain
     /// ⌘V is "Keep Source Formatting" and renders our fontless RTF in Word's default,
-    /// Times.) The user toggles this in Settings per their Word key binding.
-    private static var pasteModifiers: CGEventFlags {
-        AppSettings.shared.mergePaste
+    /// Times.) Pasting into any other app falls back to a plain ⌘V, since the ⌘⇧⌥V
+    /// combo would otherwise do nothing useful there. The user toggles this in Settings
+    /// per their Word key binding.
+    private static func pasteModifiers(for app: NSRunningApplication?) -> CGEventFlags {
+        let isMergePasteApp = app?.bundleIdentifier.map(mergePasteApps.contains) ?? false
+        return AppSettings.shared.mergePaste && isMergePasteApp
             ? [.maskCommand, .maskShift, .maskAlternate]
             : [.maskCommand]
     }
 
-    private static func synthesizePaste() {
+    private static func synthesizePaste(modifiers: CGEventFlags) {
         guard Permissions.isTrusted else {
             Permissions.ensureTrusted(prompt: true)
             return
         }
-        let modifiers = pasteModifiers
         let source = CGEventSource(stateID: .combinedSessionState)
         let vKey: CGKeyCode = 0x09 // "v"
         let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)

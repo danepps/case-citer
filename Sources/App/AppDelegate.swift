@@ -64,9 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Search…", action: #selector(togglePanel), keyEquivalent: "")
         menu.addItem(withTitle: "Settings…", action: #selector(showPreferences), keyEquivalent: ",")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        // These two are AppDelegate selectors, so target self.
         menu.items.forEach { $0.target = self }
+        menu.addItem(.separator())
+        // Quit's action lives on NSApplication, not AppDelegate. Targeting self would
+        // fail menu validation (self doesn't respond to terminate:) and grey it out, so
+        // point it at NSApp instead.
+        let quit = menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.target = NSApp
         item.menu = menu
         statusItem = item
     }
